@@ -7,7 +7,7 @@ of a general MIP engine — without the analyst changing anything.
 
 from __future__ import annotations
 
-from psp.ir.dsl import ge, i, le, mul, over, p, total, v
+from psp.ir.dsl import cmp, ge, i, le, mul, num, over, p, total, v
 from psp.problem.spec import (
     Assumption,
     ProblemConstraint,
@@ -83,9 +83,14 @@ class TransportationTemplate(ProblemTemplate):
                          description="Quantity required at each destination", unit="units"),
             self.indexed("cost", ["Sources", "Destinations"], self.require(data, "cost"),
                          description="Cost per unit shipped on a lane", unit="cost/unit"),
-            self.indexed("lane_capacity", ["Sources", "Destinations"], lane_capacity,
-                         description="Maximum quantity on a lane", default=1e9, unit="units"),
         ]
+        if lane_capacity:
+            parameters.append(
+                self.indexed(
+                    "lane_capacity", ["Sources", "Destinations"], lane_capacity,
+                    description="Maximum quantity on a lane", default=1e9, unit="units",
+                )
+            )
 
         constraints = [
             ProblemConstraint(
@@ -109,14 +114,21 @@ class TransportationTemplate(ProblemTemplate):
                     p("demand", i("d")),
                 ),
             ),
-            ProblemConstraint(
-                name="lane_limit",
-                statement="No lane carries more than its capacity.",
-                category="physical",
-                forall=over(s="Sources", d="Destinations"),
-                rel=le(v("ship", i("s"), i("d")), p("lane_capacity", i("s"), i("d"))),
-            ),
         ]
+        # A capacity row whose bound is the "no limit" sentinel constrains nothing
+        # and still costs a row in every solve, so the family is only emitted when
+        # some lane actually has a cap.
+        if lane_capacity:
+            constraints.append(
+                ProblemConstraint(
+                    name="lane_limit",
+                    statement="No lane carries more than its capacity.",
+                    category="physical",
+                    forall=over(s="Sources", d="Destinations"),
+                    where=cmp("lt", p("lane_capacity", i("s"), i("d")), num(1e9)),
+                    rel=le(v("ship", i("s"), i("d")), p("lane_capacity", i("s"), i("d"))),
+                )
+            )
 
         return ProblemSpec(
             key=data.get("key", "transportation"),

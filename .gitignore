@@ -18,3 +18,6 @@ dist/
 *.db
 .env
 .env.local
+
+# Build metadata
+*.tsbuildinfo

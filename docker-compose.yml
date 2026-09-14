@@ -1,0 +1,56 @@
+# The full stack. `docker compose up` gives a working platform with
+# PostgreSQL + PostGIS + ltree and Keycloak wired in.
+#
+# The API also runs with nothing but Python (SQLite, no auth) — see the README.
+
+services:
+  db:
+    # postgis/postgis carries PostGIS; ltree and pg_trgm ship with PostgreSQL
+    # itself. The migrations enable all three.
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: psp
+      POSTGRES_PASSWORD: psp
+      POSTGRES_DB: psp
+    ports: ["5432:5432"]
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U psp -d psp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: ["start-dev", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports: ["8080:8080"]
+
+  api:
+    build: ./backend
+    environment:
+      PSP_DATABASE_URL: postgresql+psycopg://psp:psp@db:5432/psp
+      PSP_ENVIRONMENT: docker
+      # Authentication stays off until a realm exists. Set PSP_AUTH_REQUIRED
+      # to true once Keycloak has a 'psp' realm and a 'psp-api' client; until
+      # then /api/health reports the API as open.
+      PSP_AUTH_REQUIRED: "false"
+      PSP_KEYCLOAK_ISSUER: http://keycloak:8080/realms/psp
+      PSP_KEYCLOAK_AUDIENCE: psp-api
+      PSP_CORS_ORIGINS: '["http://localhost:5173","http://localhost:8081"]'
+    depends_on:
+      db:
+        condition: service_healthy
+    ports: ["8000:8000"]
+
+  web:
+    build: ./frontend
+    depends_on: [api]
+    ports: ["8081:80"]
+
+volumes:
+  db-data:

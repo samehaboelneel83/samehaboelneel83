@@ -63,6 +63,12 @@ class Solution(BaseModel):
     binding_constraints: list[ConstraintOutcome] = Field(default_factory=list)
     slack_constraints: list[ConstraintOutcome] = Field(default_factory=list)
     values: dict[str, float] = Field(default_factory=dict)
+    duals_available: bool = False
+    duals_unavailable_reason: str | None = None
+    """Why no shadow prices came back, and what to do about it. Absent duals
+    have several quite different causes — an integer model has none to give, a
+    combinatorial engine does not compute them — and telling them apart is the
+    difference between 'try another engine' and 'use sensitivity analysis'."""
     wall_time_seconds: float = 0.0
     gap: float | None = None
     message: str | None = None
@@ -85,12 +91,42 @@ def build_solution(compiled: CompiledProblem, result: SolveResult) -> Solution:
     if not result.status.has_solution or not result.values:
         return solution
 
+    solution.duals_available = bool(result.duals)
+    if not result.duals:
+        solution.duals_unavailable_reason = _why_no_duals(compiled, result)
+
     solution.objectives = _objectives(compiled, result.values)
     solution.decisions = _decisions(compiled, result.values)
     binding, slack = _constraints(compiled, result)
     solution.binding_constraints = binding
     solution.slack_constraints = slack
     return solution
+
+
+def _why_no_duals(compiled: CompiledProblem, result: SolveResult) -> str:
+    """Name the actual cause rather than guessing at the most common one."""
+    from psp.solvers.registry import capabilities
+
+    if compiled.flat.stats()["is_integer"]:
+        return (
+            "this model has integer variables, so no dual values exist; use "
+            "sensitivity analysis to see what a parameter is worth"
+        )
+    try:
+        engine_provides_duals = capabilities(result.solver).duals
+    except KeyError:
+        engine_provides_duals = False
+    if not engine_provides_duals:
+        return (
+            f"the '{result.solver}' engine does not compute dual values; "
+            "re-solve with 'highs' to get shadow prices for this model"
+        )
+    if len(compiled.flat.objective.components) > 1:
+        return (
+            "this model has several weighted objectives, so a dual refers to the "
+            "composite rather than to any one of them"
+        )
+    return "the solver returned no dual values for this model"
 
 
 def _objectives(compiled: CompiledProblem, values: dict[str, float]) -> list[ObjectiveValue]:

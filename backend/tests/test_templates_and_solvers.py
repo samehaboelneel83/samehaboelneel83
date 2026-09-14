@@ -184,3 +184,50 @@ def test_template_rejects_impossible_data_before_solving():
     data["horizon"] = 2
     with pytest.raises(ValueError, match="shorter than the longest task"):
         scheduling.build(data)
+
+
+def test_missing_duals_name_their_actual_cause():
+    """Absent shadow prices have several causes, and they need different fixes.
+
+    Reporting "integer model" for a continuous problem solved by a
+    combinatorial engine sends the reader to sensitivity analysis when
+    re-solving with an LP engine would have answered the question.
+    """
+    transport = get("transportation")
+    data = transport.example()
+    data.pop("lane_capacity")
+    compiled = compile_and_flatten(transport.build(data))
+
+    by_network, _ = run_solver(compiled.flat, solver="networkx", options=OPTIONS)
+    network_solution = build_solution(compiled, by_network)
+    assert network_solution.duals_available is False
+    assert "networkx" in network_solution.duals_unavailable_reason
+    assert "integer" not in network_solution.duals_unavailable_reason
+
+    by_highs, _ = run_solver(compiled.flat, solver="highs", options=OPTIONS)
+    highs_solution = build_solution(compiled, by_highs)
+    assert highs_solution.duals_available is True
+    assert highs_solution.duals_unavailable_reason is None
+
+    assignment = get("assignment")
+    compiled = compile_and_flatten(assignment.build(assignment.example()))
+    result, _ = run_solver(compiled.flat, solver="highs", options=OPTIONS)
+    integer_solution = build_solution(compiled, result)
+    assert integer_solution.duals_available is False
+    assert "integer variables" in integer_solution.duals_unavailable_reason
+
+
+def test_sentinel_capacities_do_not_become_constraint_rows():
+    """A bound of "no limit" constrains nothing and must not cost a row."""
+    template = get("transportation")
+
+    uncapped = template.example()
+    uncapped.pop("lane_capacity")
+    without = compile_and_flatten(template.build(uncapped))
+    assert not any(c.name == "lane_limit" for c in without.flat.constraints)
+
+    capped = template.example()
+    with_caps = compile_and_flatten(template.build(capped))
+    lane_rows = [c for c in with_caps.flat.constraints if c.name == "lane_limit"]
+    # Exactly the lanes that were actually given a cap, not every lane.
+    assert len(lane_rows) == len(capped["lane_capacity"])
