@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+.coverage
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local
+*.sqlite3
+*.db
+.env
+.env.local

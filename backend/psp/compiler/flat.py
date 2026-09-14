@@ -1,0 +1,70 @@
+"""The flat model: what a solver adapter actually receives.
+
+The flat model is a plain linear system — variables with bounds, constraints
+as sparse rows, one objective. Every row keeps a ``source`` back-pointer to the
+IR constraint and the index tuple it came from, which is what makes an answer
+to "why is this decision what it is?" possible without an LLM.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from psp.ir.model import Sense, VarKind
+
+FlatRelOp = Literal["le", "ge", "eq"]
+
+
+class FlatVar(BaseModel):
+    key: str
+    name: str
+    index: list[str] = Field(default_factory=list)
+    kind: VarKind
+    lb: float
+    ub: float | None = None
+
+
+class FlatConstraint(BaseModel):
+    key: str
+    name: str
+    terms: dict[str, float]
+    op: FlatRelOp
+    rhs: float
+    index: list[str] = Field(default_factory=list)
+    statement: str | None = None
+
+
+class FlatObjective(BaseModel):
+    sense: Sense = "minimize"
+    terms: dict[str, float] = Field(default_factory=dict)
+    constant: float = 0.0
+    components: list[dict] = Field(default_factory=list)
+
+
+class FlatModel(BaseModel):
+    """A solver-ready linear (or mixed-integer) program."""
+
+    name: str
+    variables: list[FlatVar] = Field(default_factory=list)
+    constraints: list[FlatConstraint] = Field(default_factory=list)
+    objective: FlatObjective = Field(default_factory=FlatObjective)
+    structure: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+
+    @property
+    def var_index(self) -> dict[str, FlatVar]:
+        return {v.key: v for v in self.variables}
+
+    def stats(self) -> dict:
+        kinds: dict[str, int] = {}
+        for v in self.variables:
+            kinds[v.kind] = kinds.get(v.kind, 0) + 1
+        return {
+            "variables": len(self.variables),
+            "constraints": len(self.constraints),
+            "nonzeros": sum(len(c.terms) for c in self.constraints),
+            "variable_kinds": kinds,
+            "is_integer": any(v.kind in ("binary", "integer") for v in self.variables),
+        }
