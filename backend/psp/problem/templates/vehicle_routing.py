@@ -10,7 +10,7 @@ assumption, rather than letting an operator discover it in production.
 
 from __future__ import annotations
 
-from psp.ir.dsl import add, all_of, differ, eq, ge, i, is_not, le, mul, num, over, p, sub, total, v
+from psp.ir.dsl import all_of, differ, eq, ge, i, is_not, le, mul, num, over, p, sub, total, v
 from psp.problem.spec import (
     Assumption,
     ProblemConstraint,
@@ -166,7 +166,9 @@ class VehicleRoutingTemplate(ProblemTemplate):
                     "demand, which rules out routes that never return to the depot."
                 ),
                 category="modelling",
-                rationale="Miller-Tucker-Zemlin subtour elimination, doubling as capacity tracking.",
+                rationale=(
+                    "Miller-Tucker-Zemlin subtour elimination, doubling as capacity tracking."
+                ),
                 forall=over(a="Nodes", b="Nodes"),
                 where=all_of(differ("a", "b"), is_not("a", depot), is_not("b", depot)),
                 rel=ge(

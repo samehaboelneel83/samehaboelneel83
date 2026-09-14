@@ -14,7 +14,7 @@ import time
 from fractions import Fraction
 
 from psp.compiler.flat import FlatModel
-from psp.solvers.base import Capabilities, SolveOptions, SolveResult, SolveStatus, SolverAdapter
+from psp.solvers.base import Capabilities, SolveOptions, SolverAdapter, SolveResult, SolveStatus
 
 MAX_SCALE = 10**6
 

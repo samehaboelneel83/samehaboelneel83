@@ -10,11 +10,11 @@ across the process boundary to a solver worker.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-Scalar = Union[float, str]
+Scalar = float | str
 
 
 class Const(BaseModel):
@@ -47,7 +47,7 @@ class ParamRef(BaseModel):
 
     op: Literal["param"] = "param"
     name: str
-    index: list["Expr"] = Field(default_factory=list)
+    index: list[Expr] = Field(default_factory=list)
 
 
 class VarRef(BaseModel):
@@ -55,36 +55,36 @@ class VarRef(BaseModel):
 
     op: Literal["var"] = "var"
     name: str
-    index: list["Expr"] = Field(default_factory=list)
+    index: list[Expr] = Field(default_factory=list)
 
 
 class Neg(BaseModel):
     op: Literal["neg"] = "neg"
-    arg: "Expr"
+    arg: Expr
 
 
 class Add(BaseModel):
     op: Literal["add"] = "add"
-    args: list["Expr"]
+    args: list[Expr]
 
 
 class Sub(BaseModel):
     op: Literal["sub"] = "sub"
-    args: list["Expr"]
+    args: list[Expr]
 
 
 class Mul(BaseModel):
     """Product. At most one factor may carry decision variables."""
 
     op: Literal["mul"] = "mul"
-    args: list["Expr"]
+    args: list[Expr]
 
 
 class Div(BaseModel):
     """Quotient. The divisor must be constant."""
 
     op: Literal["div"] = "div"
-    args: list["Expr"]
+    args: list[Expr]
 
 
 class Binding(BaseModel):
@@ -99,12 +99,12 @@ class Sum(BaseModel):
 
     op: Literal["sum"] = "sum"
     over: list[Binding]
-    body: "Expr"
-    where: "Pred | None" = None
+    body: Expr
+    where: Pred | None = None
 
 
 Expr = Annotated[
-    Union[Const, Lit, IdxRef, ParamRef, VarRef, Neg, Add, Sub, Mul, Div, Sum],
+    Const | Lit | IdxRef | ParamRef | VarRef | Neg | Add | Sub | Mul | Div | Sum,
     Field(discriminator="op"),
 ]
 
@@ -122,20 +122,20 @@ class Cmp(BaseModel):
 
 class And(BaseModel):
     pred: Literal["and"] = "and"
-    args: list["Pred"]
+    args: list[Pred]
 
 
 class Or(BaseModel):
     pred: Literal["or"] = "or"
-    args: list["Pred"]
+    args: list[Pred]
 
 
 class Not(BaseModel):
     pred: Literal["not"] = "not"
-    arg: "Pred"
+    arg: Pred
 
 
-Pred = Annotated[Union[Cmp, And, Or, Not], Field(discriminator="pred")]
+Pred = Annotated[Cmp | And | Or | Not, Field(discriminator="pred")]
 
 RelOp = Literal["le", "ge", "eq"]
 

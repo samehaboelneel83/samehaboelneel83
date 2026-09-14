@@ -20,7 +20,9 @@ from psp.provenance.solution import Solution
 
 class ProvenanceNode(BaseModel):
     id: str
-    kind: str  # source | fact | parameter | constraint | objective | model | run | solution | decision
+    # One of: source, fact, parameter, constraint, objective, model, run,
+    # solution, decision.
+    kind: str
     label: str
     detail: str | None = None
     attributes: dict = Field(default_factory=dict)

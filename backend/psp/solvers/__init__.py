@@ -1,9 +1,9 @@
 from psp.solvers.base import (
     Capabilities,
     SolveOptions,
+    SolverAdapter,
     SolveResult,
     SolveStatus,
-    SolverAdapter,
 )
 
 __all__ = ["Capabilities", "SolveOptions", "SolveResult", "SolveStatus", "SolverAdapter"]

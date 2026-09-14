@@ -176,8 +176,12 @@ class TransportationTemplate(ProblemTemplate):
                 ),
                 Assumption(
                     key="linear_cost",
-                    statement="Shipping cost is proportional to quantity, with no fixed cost per lane.",
-                    rationale="Opening a lane is assumed free; use a facility-location model if not.",
+                    statement=(
+                        "Shipping cost is proportional to quantity, with no fixed cost per lane."
+                    ),
+                    rationale=(
+                        "Opening a lane is assumed free; use a facility-location model if not."
+                    ),
                     affects=["total_cost"],
                 ),
                 Assumption(

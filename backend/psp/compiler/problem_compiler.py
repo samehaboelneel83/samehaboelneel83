@@ -64,7 +64,7 @@ def compile_problem(
         IRSet(name=s.name, kind=s.kind, elements=list(s.elements), description=s.description)
         for s in spec.sets
     ]
-    for s, ir_set in zip(spec.sets, sets):
+    for s, ir_set in zip(spec.sets, sets, strict=True):
         record.mappings.append(
             Mapping("set", ir_set.name, "problem_set", s.name,
                     statement=s.description,

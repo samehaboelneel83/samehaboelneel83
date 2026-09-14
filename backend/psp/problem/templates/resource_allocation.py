@@ -29,7 +29,10 @@ class ResourceAllocationTemplate(ProblemTemplate):
     def inputs(self) -> list[TemplateInput]:
         return [
             TemplateInput(key="activities", label="Activities", kind="entities",
-                          description="The things you can choose to do, and how much value each unit yields."),
+                          description=(
+                              "The things you can choose to do, and how much value "
+                              "each unit yields."
+                          )),
             TemplateInput(key="resources", label="Resources", kind="entities",
                           description="The limited resources the activities consume."),
             TemplateInput(key="value", label="Value per unit", kind="table",

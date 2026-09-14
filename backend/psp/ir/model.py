@@ -35,7 +35,7 @@ class IRSet(BaseModel):
         return v
 
     @classmethod
-    def integers(cls, name: str, lo: int, hi: int, **kw) -> "IRSet":
+    def integers(cls, name: str, lo: int, hi: int, **kw) -> IRSet:
         """Inclusive integer range ``[lo, hi]``."""
         return cls(name=name, kind="int", elements=[str(i) for i in range(lo, hi + 1)], **kw)
 

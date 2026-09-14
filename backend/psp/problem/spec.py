@@ -81,7 +81,9 @@ class ProblemConstraint(BaseModel):
     forall: list[Binding] = Field(default_factory=list)
     where: Pred | None = None
     rel: Rel
-    category: Literal["physical", "policy", "regulatory", "operational", "modelling"] = "operational"
+    category: Literal[
+        "physical", "policy", "regulatory", "operational", "modelling"
+    ] = "operational"
     rationale: str | None = None
     origin: SourceRef | None = None
 

@@ -9,7 +9,7 @@ tie the model to one solver, which is exactly what the IR exists to avoid.
 
 from __future__ import annotations
 
-from psp.ir.dsl import add, all_of, cmp, eq, ge, i, le, mul, num, over, p, sub, total, v
+from psp.ir.dsl import add, all_of, cmp, eq, ge, i, le, mul, num, over, p, total, v
 from psp.problem.spec import (
     Assumption,
     ProblemConstraint,
@@ -42,14 +42,20 @@ class SchedulingTemplate(ProblemTemplate):
                           columns=["task", "duration"]),
             TemplateInput(key="horizon", label="Horizon", kind="number",
                           description="Number of periods available."),
-            TemplateInput(key="resource_usage", label="Resource usage", kind="table", required=False,
-                          description="Units of the shared resource each task occupies while running.",
+            TemplateInput(key="resource_usage", label="Resource usage", kind="table",
+                          required=False,
+                          description=(
+                              "Units of the shared resource each task occupies while running."
+                          ),
                           columns=["task", "usage"]),
             TemplateInput(key="resource_capacity", label="Resource capacity", kind="number",
-                          required=False, description="Units of the shared resource available each period.",
+                          required=False,
+                          description="Shared-resource units available each period.",
                           default=1),
             TemplateInput(key="precedence", label="Precedence", kind="table", required=False,
-                          description="Pairs where the first task must finish before the second starts.",
+                          description=(
+                              "Pairs where the first task must finish before the second starts."
+                          ),
                           columns=["before", "after"]),
             TemplateInput(key="release", label="Earliest start", kind="table", required=False,
                           description="Period before which a task may not start.",
@@ -63,9 +69,15 @@ class SchedulingTemplate(ProblemTemplate):
         return {
             "name": "Runway repair sequence",
             "tasks": ["survey", "clear_debris", "resurface", "mark_lines", "inspect"],
-            "duration": {"survey": 2, "clear_debris": 3, "resurface": 4, "mark_lines": 2, "inspect": 1},
+            "duration": {
+                "survey": 2, "clear_debris": 3, "resurface": 4,
+                "mark_lines": 2, "inspect": 1,
+            },
             "horizon": 16,
-            "resource_usage": {"survey": 1, "clear_debris": 2, "resurface": 2, "mark_lines": 1, "inspect": 1},
+            "resource_usage": {
+                "survey": 1, "clear_debris": 2, "resurface": 2,
+                "mark_lines": 1, "inspect": 1,
+            },
             "resource_capacity": 2,
             "precedence": [
                 ["survey", "clear_debris"],

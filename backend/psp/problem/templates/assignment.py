@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from psp.ir.dsl import eq, ge, i, le, mul, over, p, total, v
+from psp.ir.dsl import eq, i, le, mul, over, p, total, v
 from psp.problem.spec import (
     Assumption,
     ProblemConstraint,
@@ -33,12 +33,16 @@ class AssignmentTemplate(ProblemTemplate):
             TemplateInput(key="tasks", label="Tasks", kind="entities",
                           description="Work items that need covering."),
             TemplateInput(key="cost", label="Assignment cost", kind="table",
-                          description="Cost of assigning each agent to each task. Omit a pair to forbid it.",
+                          description=(
+                              "Cost of assigning each agent to each task. Omit a pair to forbid "
+                              "it."
+                          ),
                           columns=["agent", "task", "cost"]),
             TemplateInput(key="capacity", label="Agent capacity", kind="table", required=False,
                           description="Maximum tasks per agent (default 1).",
                           columns=["agent", "capacity"]),
-            TemplateInput(key="required", label="Assignments per task", kind="table", required=False,
+            TemplateInput(key="required", label="Assignments per task", kind="table",
+                          required=False,
                           description="How many agents each task needs (default 1).",
                           columns=["task", "required"]),
             TemplateInput(key="qualified", label="Qualification", kind="table", required=False,
@@ -62,7 +66,10 @@ class AssignmentTemplate(ProblemTemplate):
                 "crew_delta|supply_depot": 5, "crew_delta|field_clinic": 6,
             },
             "capacity": {"crew_alpha": 1, "crew_bravo": 2, "crew_charlie": 1, "crew_delta": 1},
-            "required": {"flood_zone_a": 1, "flood_zone_b": 1, "supply_depot": 1, "field_clinic": 1},
+            "required": {
+                "flood_zone_a": 1, "flood_zone_b": 1,
+                "supply_depot": 1, "field_clinic": 1,
+            },
             "qualified": {"crew_delta|field_clinic": 0},
         }
 
@@ -157,7 +164,9 @@ class AssignmentTemplate(ProblemTemplate):
                 ),
                 Assumption(
                     key="forbidden_as_penalty",
-                    statement="Pairs with no stated cost are treated as allowed but very expensive.",
+                    statement=(
+                        "Pairs with no stated cost are treated as allowed but very expensive."
+                    ),
                     rationale=(
                         "This keeps the model feasible when data is incomplete; use the "
                         "qualification table to forbid a pair outright."
@@ -170,7 +179,10 @@ class AssignmentTemplate(ProblemTemplate):
                     key="one_agent_lost", name="Largest agent unavailable",
                     description="The highest-capacity agent is withdrawn from the pool.",
                     overrides=[
-                        ScenarioOverride(parameter="capacity", index=[_largest(data, agents)], value=0.0)
+                        ScenarioOverride(
+                            parameter="capacity",
+                            index=[_largest(data, agents)], value=0.0,
+                        )
                     ],
                 ),
             ],

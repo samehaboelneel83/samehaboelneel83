@@ -12,23 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from psp.compiler.errors import DomainError, NonLinearError, UnboundIndexError
-from psp.ir.expr import (
-    Add,
-    And,
-    Cmp,
-    Const,
-    Div,
-    IdxRef,
-    Lit,
-    Mul,
-    Neg,
-    Not,
-    Or,
-    ParamRef,
-    Sub,
-    Sum,
-    VarRef,
-)
 from psp.ir.model import IRModel
 
 # Element labels are compared and hashed as strings; numeric-set elements are
@@ -47,22 +30,23 @@ class Affine:
     def is_constant(self) -> bool:
         return not self.terms
 
-    def __add__(self, other: "Affine") -> "Affine":
+    def __add__(self, other: Affine) -> Affine:
         out = Affine(self.constant + other.constant, dict(self.terms))
         for k, v in other.terms.items():
             out.terms[k] = out.terms.get(k, 0.0) + v
         return out.prune()
 
-    def __neg__(self) -> "Affine":
+    def __neg__(self) -> Affine:
         return Affine(-self.constant, {k: -v for k, v in self.terms.items()})
 
-    def __sub__(self, other: "Affine") -> "Affine":
+    def __sub__(self, other: Affine) -> Affine:
         return self + (-other)
 
-    def scale(self, factor: float) -> "Affine":
-        return Affine(self.constant * factor, {k: v * factor for k, v in self.terms.items()}).prune()
+    def scale(self, factor: float) -> Affine:
+        scaled = {k: v * factor for k, v in self.terms.items()}
+        return Affine(self.constant * factor, scaled).prune()
 
-    def prune(self, eps: float = 1e-12) -> "Affine":
+    def prune(self, eps: float = 1e-12) -> Affine:
         self.terms = {k: v for k, v in self.terms.items() if abs(v) > eps}
         return self
 
@@ -142,7 +126,8 @@ class Evaluator:
                 raise DomainError(f"unknown variable '{node.name}'")
             idx = self._subscript(node.index, env, f"variable '{node.name}'")
             self._check_arity(decl.index_sets, idx, f"variable '{node.name}'")
-            for set_name, element in zip(decl.index_sets, idx):
+            # _check_arity above guarantees equal length; strict keeps it that way.
+            for set_name, element in zip(decl.index_sets, idx, strict=True):
                 if element not in self.elements(set_name):
                     raise DomainError(
                         f"variable '{node.name}' subscripted with '{element}', "

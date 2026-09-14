@@ -39,6 +39,14 @@ _REGISTRY: dict[str, tuple[str, str, Capabilities]] = {
 }
 
 
+class UnsupportedModelError(RuntimeError):
+    """No eligible solver, or the requested one cannot take this model."""
+
+    def __init__(self, message: str, considered: list[dict] | None = None):
+        self.considered = considered or []
+        super().__init__(message)
+
+
 def available() -> list[str]:
     return sorted(_REGISTRY)
 
@@ -69,25 +77,38 @@ def select(model, preferred: str | None = None) -> tuple[str, list[dict]]:
 
     Selection is capability-driven and deterministic, so the audit trail can
     record not just which engine ran but which engines were eligible.
+
+    An explicitly requested engine is never silently substituted. Quietly
+    solving with a different engine than the one asked for would make a run's
+    record a lie, which matters more than the convenience of always returning
+    an answer.
     """
     order = ["networkx", "cpsat", "highs"]  # most specialised first
-    if preferred:
-        order = [preferred] + [n for n in order if n != preferred]
 
     considered: list[dict] = []
-    chosen: str | None = None
     for name in order:
-        if name not in _REGISTRY:
-            considered.append({"solver": name, "eligible": False, "reason": "unknown solver"})
-            continue
         ok, reason = _StaticAdapter(name).accepts(model)
         considered.append({"solver": name, "eligible": ok, "reason": reason})
-        if ok and chosen is None:
-            chosen = name
+
+    if preferred:
+        if preferred not in _REGISTRY:
+            raise KeyError(
+                f"unknown solver '{preferred}'; available: {', '.join(available())}"
+            )
+        entry = next(c for c in considered if c["solver"] == preferred)
+        if not entry["eligible"]:
+            raise UnsupportedModelError(
+                f"solver '{preferred}' cannot solve this model: {entry['reason']}",
+                considered=considered,
+            )
+        return preferred, considered
+
+    chosen = next((c["solver"] for c in considered if c["eligible"]), None)
     if chosen is None:
-        raise RuntimeError(
+        raise UnsupportedModelError(
             "no registered solver accepts this model: "
-            + "; ".join(f"{c['solver']}: {c['reason']}" for c in considered if c["reason"])
+            + "; ".join(f"{c['solver']}: {c['reason']}" for c in considered if c["reason"]),
+            considered=considered,
         )
     return chosen, considered
 

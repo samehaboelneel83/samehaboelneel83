@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 
 from psp.compiler.flat import FlatModel
-from psp.solvers.base import Capabilities, SolveOptions, SolveResult, SolveStatus, SolverAdapter
+from psp.solvers.base import Capabilities, SolveOptions, SolverAdapter, SolveResult, SolveStatus
 
 SCALE = 10**6  # network simplex needs integral costs and capacities
 
@@ -33,7 +33,8 @@ class NetworkXAdapter(SolverAdapter):
 
         spec = model.structure
         arc_var = spec["arc_variable"]
-        arcs = spec["arcs"]          # [{"key":..., "tail":..., "head":..., "cost":..., "capacity":...}]
+        # each arc: {"key", "tail", "head", "cost", "capacity"}
+        arcs = spec["arcs"]
         supply = spec["supply"]      # {node: net supply (positive) / demand (negative)}
 
         total = sum(supply.values())

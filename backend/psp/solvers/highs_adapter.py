@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 
 from psp.compiler.flat import FlatModel
-from psp.solvers.base import Capabilities, SolveOptions, SolveResult, SolveStatus, SolverAdapter
+from psp.solvers.base import Capabilities, SolveOptions, SolverAdapter, SolveResult, SolveStatus
 
 _STATUS = {
     "Optimal": SolveStatus.OPTIMAL,
@@ -72,11 +72,14 @@ class HighsAdapter(SolverAdapter):
                 indices.append(col_of[key])
                 values.append(coef)
             if c.op == "le":
-                lo.append(-inf); hi.append(c.rhs)
+                lo.append(-inf)
+                hi.append(c.rhs)
             elif c.op == "ge":
-                lo.append(c.rhs); hi.append(inf)
+                lo.append(c.rhs)
+                hi.append(inf)
             else:
-                lo.append(c.rhs); hi.append(c.rhs)
+                lo.append(c.rhs)
+                hi.append(c.rhs)
         if model.constraints:
             h.addRows(
                 len(model.constraints),

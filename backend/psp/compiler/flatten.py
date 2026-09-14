@@ -8,7 +8,7 @@ what lets a solution be replayed against the exact model that produced it.
 from __future__ import annotations
 
 from psp.compiler.errors import CompileError, DomainError
-from psp.compiler.evaluator import Affine, Evaluator, var_key
+from psp.compiler.evaluator import Affine, Evaluator
 from psp.compiler.flat import FlatConstraint, FlatModel, FlatObjective, FlatVar
 from psp.ir.model import IRModel, IRVar
 
@@ -21,7 +21,9 @@ def flatten(model: IRModel) -> FlatModel:
         if key in columns:
             return
         lb, ub = decl.bounds()
-        columns[key] = FlatVar(key=key, name=decl.name, index=list(index), kind=decl.kind, lb=lb, ub=ub)
+        columns[key] = FlatVar(
+            key=key, name=decl.name, index=list(index), kind=decl.kind, lb=lb, ub=ub
+        )
 
     ev = Evaluator(model, on_var=materialise)
     rows: list[FlatConstraint] = []
@@ -38,7 +40,7 @@ def flatten(model: IRModel) -> FlatModel:
                 lhs = ev.affine(c.rel.lhs, env)
                 rhs = ev.affine(c.rel.rhs, env)
             except CompileError as exc:
-                raise CompileError(str(exc), where=f"constraint '{key}'") from exc
+                raise exc.at(f"constraint '{key}'") from exc
             body = _num(lhs, c.name) - _num(rhs, c.name)
             if not body.terms:
                 # A constraint with no variables is a data assertion: either it
@@ -91,7 +93,7 @@ def _flatten_objectives(model: IRModel, ev: Evaluator) -> tuple[FlatObjective, l
         try:
             aff = _num(ev.affine(o.expr, {}), o.name)
         except CompileError as exc:
-            raise CompileError(str(exc), where=f"objective '{o.name}'") from exc
+            raise exc.at(f"objective '{o.name}'") from exc
         # Normalise to minimisation so adapters never need a sense switch.
         sign = 1.0 if o.sense == "minimize" else -1.0
         total = total + aff.scale(sign * o.weight)
@@ -107,8 +109,15 @@ def _flatten_objectives(model: IRModel, ev: Evaluator) -> tuple[FlatObjective, l
         )
     if not components:
         # A pure satisfaction problem: any feasible point will do.
-        components.append({"name": "feasibility", "sense": "minimize", "weight": 0.0, "terms": {}, "constant": 0.0})
-    return FlatObjective(sense="minimize", terms=dict(total.terms), constant=total.constant, components=components), components
+        components.append(
+            {"name": "feasibility", "sense": "minimize", "weight": 0.0,
+             "terms": {}, "constant": 0.0}
+        )
+    objective = FlatObjective(
+        sense="minimize", terms=dict(total.terms),
+        constant=total.constant, components=components,
+    )
+    return objective, components
 
 
 def _check_bounds(columns: list[FlatVar]) -> None:
