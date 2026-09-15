@@ -151,6 +151,17 @@ row has to stay a line a shadow price can be attached to.
 `examples/balanced_workload.psp` is the worked example, and its answers are
 checked against ones computed by hand.
 
+Swapping a range for a variance is not a free substitution, because the two are
+on different scales: a range over these units spans about ten, and its square
+spans thousands, so a balance term that was a tiebreaker becomes one that
+outbids commitments. `examples/commitment_planning.psp` shows what that costs.
+Its objective weights are not tuned by feel — they are derived, in a comment
+above them, from the cheapest commitment on one side and the widest the squared
+balance term can be on the other, and a test asserts that inequality rather than
+the numbers the model happens to produce. Every scenario covers exactly the work
+it covered before the measure changed, which is the evidence the derivation
+worked.
+
 ## Problem templates
 
 `resource_allocation` · `assignment` · `scheduling` · `transportation` ·

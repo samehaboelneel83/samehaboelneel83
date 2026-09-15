@@ -83,6 +83,12 @@ param specialty_covers[Specialties, Specialties] default 0 = {
 param is_leaf[Units] default 0 "1 for a unit with nothing beneath it" = {
     ops_north: 1, ops_south: 1, instruction: 1, assessment: 1 }
 
+# How many units is_leaf marks. The balance objective needs it to compare a unit
+# against the average, and the language has no count of its own, so it is stated
+# — and a test asserts it against is_leaf, the way the other derived tables here
+# are kept honest.
+param leaf_count "How many leaf units there are" = 4
+
 # How many leaf units two nodes of the tree have in common. This is what lets a
 # branch commitment cost the right amount: assigning one to operations engages
 # both its units, so it consumes two unit-periods, and it shows up in the load
@@ -190,11 +196,13 @@ var allocate[Commitments, Units, Periods] binary
 var met[Commitments] binary
   means "Deliver this commitment in full"
 
-var load[Units, TimeNodes] continuous in [0, 999]
+# Integer, because a unit-period is a count and always was. Declaring it makes
+# the model fully discrete, which is what lets the quadratic objective below be
+# handed to CP-SAT — and the bound is 99 against a reachable maximum of 80
+# (four leaf units across twenty periods), which keeps the products CP-SAT
+# builds for that objective small.
+var load[Units, TimeNodes] integer in [0, 99]
   means "Unit-periods this part of the organisation spends in this part of the horizon"
-
-var busiest continuous in [0, 999] "Unit-periods spent by the most loaded unit"
-var idlest continuous in [0, 999] "Unit-periods spent by the least loaded unit"
 
 # -------------------------------------------------------------- hard rules
 
@@ -276,25 +284,32 @@ constraint specialty_capacity_at_every_level "A capability is not oversubscribed
         where specialty_covers[s, s2] == 1 and needs[c, s2] == 1)
       <= specialty_capacity[s]
 
-constraint busiest_covers_every_unit "The busiest load is at least every leaf unit's load"
-  category modelling
-  forall u in Units where is_leaf[u] == 1:
-    busiest >= load[u, horizon]
-
-constraint idlest_under_every_unit "The idlest load is at most every leaf unit's load"
-  category modelling
-  forall u in Units where is_leaf[u] == 1:
-    idlest <= load[u, horizon]
-
 # -------------------------------------------------------------- objectives
 
+# The two weights are not a preference to be tuned by feel. They are set so that
+# coverage cannot be traded for balance at all, which is what the range measure
+# gave for free and a squared one does not:
+#
+#   each of the four terms is the square of (four times a leaf unit\'s load,
+#   less the whole organisation\'s), which the allowances hold under 40, so the
+#   spread can never exceed 4 * 40^2 = 6400;
+#   the cheapest commitment in the table is worth 20, so dropping any one of
+#   them costs at least 20 * 1000 = 20000.
+#
+# 20000 > 6400, with room to spare, so balance decides between plans that cover
+# the same commitments and never decides which commitments are covered. That is
+# what the range measure gave for free, and what a retuned weight has to buy
+# back once the measure is squared.
 maximize commitment_coverage "Deliver as much weighted commitment as possible"
   unit "weight points"
-  weight 10:
+  weight 1000:
   sum(weight[c] * met[c] for c in Commitments)
 
-minimize load_spread "Keep the units evenly loaded" unit "unit-periods" weight 1:
-  busiest - idlest
+minimize load_spread "Keep the units evenly loaded"
+  unit "squared unit-periods" weight 1:
+  sum((leaf_count * load[u, horizon] - load[organisation, horizon])
+      * (leaf_count * load[u, horizon] - load[organisation, horizon])
+      for u in Units where is_leaf[u] == 1)
 
 # ------------------------------------------------------------- assumptions
 
@@ -321,10 +336,11 @@ assume a_level_is_a_set_that_rolls_up "A level of any of the three trees is a se
           "horizon, a section and a department, instead of one rule per level"
   affects rollup, allowance_at_every_level, specialty_capacity_at_every_level
 
-assume balance_is_a_range_not_a_variance "Balance is the gap between the busiest and "
-                                         "idlest leaf unit over the horizon"
-  because "Variance is quadratic and this model is linear; the range is the linear "
-          "measure of the same idea"
+assume balance_is_a_variance_about_the_mean "Balance is how far each leaf unit is "
+                                            "from the average leaf unit, squared"
+  because "A range sees only the busiest and the idlest, so it cannot tell one "
+          "overloaded unit from three; the variance sees all of them, which is "
+          "what balance means when someone says it"
   affects load_spread
 
 assume weights_are_comparable "Weights across commitments are on one scale"

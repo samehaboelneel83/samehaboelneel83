@@ -178,6 +178,23 @@ language accepts them as ordinary parameters and stays out of it.
 
 ---
 
+### Weights that encode a precedence are derived, not tuned
+
+Where one objective must never be traded against another, the weights that say
+so are worked out from the model's own numbers and the working is kept beside
+them: the cheapest thing the first objective can lose, against the widest span
+of the second. In the commitment plan that is 20 x 1000 against 4 x 40^2, and
+the test asserts the inequality rather than the figures the solver returns.
+
+The reason is that a weight tuned until the answer looks right is a weight that
+will stop being right when the data moves, silently, in a direction nobody is
+watching. The reason it matters here is that squaring a term moves it by orders
+of magnitude: balance as a range spans about ten, and as a variance, thousands.
+A measure swapped without retuning would have kept its name, kept its place in
+the objective, and quietly started deciding which commitments get dropped.
+
+---
+
 ### Portable JSON in the ORM, PostgreSQL features in migrations
 
 Modelling JSONB, ltree and PostGIS directly in the ORM would make PostgreSQL a

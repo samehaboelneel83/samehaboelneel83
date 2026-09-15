@@ -651,6 +651,120 @@ def test_specialty_capacity_binds_at_the_parent_not_only_the_leaves():
     assert coverage("serialised_organisation") < coverage()
 
 
+def test_the_leaf_count_agrees_with_the_units_marked_as_leaves():
+    """The balance objective needs a count the language cannot take, so the
+    count is stated. This is what keeps it true."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    leaves = [v.index[0] for v in spec.parameter("is_leaf").values if v.value == 1]
+    assert leaf_count(spec) == len(leaves)
+
+
+def leaf_count(spec) -> int:
+    """The stated number of leaf units. A scalar parameter holds its value as
+    the single entry indexed by nothing, not as a default."""
+    (only,) = spec.parameter("leaf_count").values
+    return int(only.value)
+
+
+def test_balance_never_decides_which_commitments_are_covered():
+    """The weights are a claim, and this is the claim.
+
+    Balance became a squared quantity, which is on a wholly different scale from
+    the range it replaced, so the weights had to be reset to keep coverage
+    strictly ahead of it. Asserting the numbers the model happens to produce
+    would not test that; asserting the inequality the weights were chosen from
+    does. The cheapest commitment, at its objective weight, must be worth more
+    than the entire span of the balance term.
+    """
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    coverage = next(o for o in spec.objectives if o.name == "commitment_coverage")
+    spread = next(o for o in spec.objectives if o.name == "load_spread")
+
+    weight = {v.index[0]: v.value for v in spec.parameter("weight").values}
+    cheapest_commitment = min(weight.values()) * coverage.weight
+
+    # The balance term is one square per leaf unit, each bounded by the largest
+    # a leaf's load can be against the whole organisation's.
+    allowance = {tuple(v.index): v.value for v in spec.parameter("allowance").values}
+    leaves = [v.index[0] for v in spec.parameter("is_leaf").values if v.value == 1]
+    count = leaf_count(spec)
+    biggest_leaf = max(allowance[(u, "horizon")] for u in leaves)
+    # Scenarios may raise the root allowance, so take the largest one stated.
+    biggest_total = max(
+        [allowance[("organisation", "horizon")]]
+        + [
+            o.value for s in spec.scenarios for o in s.overrides
+            if o.parameter == "allowance" and o.index == ["organisation", "horizon"]
+            and o.value is not None
+        ]
+    )
+    widest = max(count * biggest_leaf, biggest_total)
+    most_the_spread_can_be = count * widest * widest * spread.weight
+
+    assert cheapest_commitment > most_the_spread_can_be, (
+        f"a commitment worth {cheapest_commitment} can be traded for balance "
+        f"worth up to {most_the_spread_can_be}"
+    )
+
+
+def test_switching_to_a_variance_left_every_scenario_covering_the_same_work():
+    """The point of retuning rather than merely swapping the measure.
+
+    These coverage figures are the ones the model produced when balance was a
+    range. A squared measure that changed them would be a squared measure that
+    had started deciding which commitments get dropped.
+    """
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    weight = {v.index[0]: v.value for v in spec.parameter("weight").values}
+    before = {
+        None: 495.0, "surge": 410.0, "invest": 555.0,
+        "assessment_stood_down": 495.0, "serialised_organisation": 465.0,
+    }
+    for scenario, coverage in before.items():
+        compiled = compile_and_flatten(spec, scenario)
+        result, _ = run_solver(compiled.flat, options=OPTIONS)
+        assert result.status == SolveStatus.OPTIMAL, scenario
+        solution = build_solution(compiled, result)
+        met = {d.index[0] for d in solution.decisions if d.variable == "met"}
+        assert sum(weight[c] for c in met) == pytest.approx(coverage), scenario
+
+
+def test_the_balance_measure_is_a_variance_and_the_plan_is_balanced():
+    """A variance sees the middle of the distribution, which is the whole reason
+    for the change — so the plan it produces is checked for being level, not
+    merely for having matching extremes."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    compiled = compile_and_flatten(spec)
+    assert compiled.flat.objective.is_quadratic
+    assert compiled.flat.objective.convex is True
+
+    result, meta = run_solver(compiled.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+    # Discrete throughout, which is what lets the quadratic reach an engine here.
+    assert meta["solver"] == "cpsat"
+    solution = build_solution(compiled, result)
+
+    load = {
+        (d.index[0], d.index[1]): d.value
+        for d in solution.decisions if d.variable == "load"
+    }
+    leaves = [v.index[0] for v in spec.parameter("is_leaf").values if v.value == 1]
+    loads = sorted(load.get((u, "horizon"), 0.0) for u in leaves)
+
+    # The two units that can take the same work carry the same amount of it.
+    assert load[("ops_north", "horizon")] == load[("ops_south", "horizon")]
+
+    # And the reported spread is the sum of squared deviations the model states,
+    # recomputed here from the plan rather than read back from the solver.
+    count = leaf_count(spec)
+    total = sum(loads)
+    expected = sum((count * x - total) ** 2 for x in loads)
+    spread = next(o for o in solution.objectives if o.name == "load_spread")
+    assert spread.sense == "minimize"
+    assert spread.value == pytest.approx(expected)
+    assert spread.unit == "squared unit-periods"
+
+
 def test_the_commitment_example_responds_to_its_scenarios():
     spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
     weight = {v.index[0]: v.value for v in spec.parameter("weight").values}
