@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
 import type { ProblemSummary, Solution } from "./lib/types";
 import { Badge, Notice } from "./components/common";
+import AuthorPage from "./pages/AuthorPage";
 import DomainPage from "./pages/DomainPage";
 import ModelPage from "./pages/ModelPage";
 import ProblemPage from "./pages/ProblemPage";
@@ -20,6 +21,7 @@ import SolvePage from "./pages/SolvePage";
  */
 const STEPS = [
   { key: "domain", label: "Domain", needsProblem: false },
+  { key: "author", label: "Author", needsProblem: false },
   { key: "problem", label: "Problem", needsProblem: false },
   { key: "model", label: "Model", needsProblem: true },
   { key: "scenario", label: "Scenario", needsProblem: true },
@@ -110,6 +112,15 @@ export default function App() {
         ))}
 
         {step === "domain" && <DomainPage />}
+        {step === "author" && (
+          <AuthorPage
+            onSaved={(key) => {
+              void refresh();
+              choose(key);
+              setStep("problem");
+            }}
+          />
+        )}
         {step === "problem" && (
           <ProblemPage
             problems={problems}

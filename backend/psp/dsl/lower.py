@@ -1,0 +1,342 @@
+"""Parse tree -> Problem Model.
+
+This is where a bare word finally becomes something: the index of an enclosing
+``forall``, a parameter, a variable, or the name of a set element. The parser
+cannot decide that, because the declaration that settles it may appear later in
+the file; this pass has the whole program in hand.
+
+A word that matches nothing is an error here rather than a puzzle three layers
+down, and it comes with the closest name that would have worked.
+"""
+
+from __future__ import annotations
+
+from psp.dsl import nodes
+from psp.dsl.errors import ResolveError, did_you_mean
+from psp.ir.expr import (
+    Add,
+    And,
+    Cmp,
+    Const,
+    Div,
+    IdxRef,
+    Lit,
+    Mul,
+    Neg,
+    Not,
+    Or,
+    ParamRef,
+    Rel,
+    Sub,
+    Sum,
+    VarRef,
+)
+from psp.ir.expr import Binding as IrBinding
+from psp.problem.spec import (
+    Assumption,
+    ParameterValue,
+    ProblemConstraint,
+    ProblemObjective,
+    ProblemParameter,
+    ProblemSet,
+    ProblemSpec,
+    ProblemVariable,
+    Scenario,
+    ScenarioOverride,
+    SourceRef,
+    StructureHint,
+)
+
+CATEGORIES = {"physical", "policy", "regulatory", "operational", "modelling"}
+
+
+class Lowering:
+    def __init__(self, program: nodes.Program, source: str, origin: str):
+        self.program = program
+        self.source = source
+        self.origin = origin
+        self.sets: dict[str, nodes.SetDecl] = {}
+        self.params: dict[str, nodes.ParamDecl] = {}
+        self.vars: dict[str, nodes.VarDecl] = {}
+        self.elements: dict[str, str] = {}  # element -> the set that declares it
+
+    # ------------------------------------------------------------- errors
+
+    def fail(self, message: str, node, hint: str | None = None) -> ResolveError:
+        return ResolveError(message, getattr(node, "line", 0), getattr(node, "column", 0),
+                            self.source, hint)
+
+    # -------------------------------------------------------------- build
+
+    def run(self) -> ProblemSpec:
+        self._collect()
+        spec = ProblemSpec(
+            key=self.program.key,
+            name=self.program.name,
+            problem_type=self.program.key,
+            description=self.program.description,
+            template_key=None,
+            metadata={"authored_in": "dsl"},
+        )
+        for decl in self.program.declarations:
+            if isinstance(decl, nodes.SetDecl):
+                spec.sets.append(self._set(decl))
+            elif isinstance(decl, nodes.ParamDecl):
+                spec.parameters.append(self._param(decl))
+            elif isinstance(decl, nodes.VarDecl):
+                spec.variables.append(self._var(decl))
+            elif isinstance(decl, nodes.ConstraintDecl):
+                spec.constraints.append(self._constraint(decl))
+            elif isinstance(decl, nodes.ObjectiveDecl):
+                spec.objectives.append(self._objective(decl))
+            elif isinstance(decl, nodes.AssumeDecl):
+                spec.assumptions.append(self._assumption(decl))
+            elif isinstance(decl, nodes.ScenarioDecl):
+                spec.scenarios.append(self._scenario(decl))
+            elif isinstance(decl, nodes.StructureDecl):
+                spec.structure = StructureHint(kind=decl.kind, **decl.fields)
+        if not spec.variables:
+            raise ResolveError(
+                f"problem '{spec.key}' declares no decision variables",
+                hint="a problem with nothing to decide has nothing to solve; add a 'var' line",
+            )
+        return spec
+
+    def _collect(self) -> None:
+        """Index every declaration first, so order in the file does not matter."""
+        for decl in self.program.declarations:
+            if isinstance(decl, nodes.SetDecl):
+                self._claim(self.sets, decl.name, decl, "set")
+                for element in decl.elements:
+                    self.elements.setdefault(element, decl.name)
+            elif isinstance(decl, nodes.ParamDecl):
+                self._claim(self.params, decl.name, decl, "parameter")
+            elif isinstance(decl, nodes.VarDecl):
+                self._claim(self.vars, decl.name, decl, "variable")
+        for name, decl in {**self.params, **self.vars}.items():
+            for set_name in decl.index_sets:
+                self._known_set(set_name, decl)
+            if name in self.params and name in self.vars:
+                raise self.fail(f"'{name}' is declared as both a parameter and a variable", decl)
+
+    def _claim(self, registry: dict, name: str, decl, kind: str) -> None:
+        if name in registry:
+            raise self.fail(
+                f"{kind} '{name}' is declared twice",
+                decl,
+                hint=f"the first is on line {registry[name].line}",
+            )
+        registry[name] = decl
+
+    def _known_set(self, name: str, node) -> nodes.SetDecl:
+        if name not in self.sets:
+            raise self.fail(f"unknown set '{name}'", node,
+                            hint=did_you_mean(name, self.sets))
+        return self.sets[name]
+
+    # -------------------------------------------------------- declarations
+
+    def _set(self, decl: nodes.SetDecl) -> ProblemSet:
+        if decl.kind == "int":
+            for element in decl.elements:
+                try:
+                    int(element)
+                except ValueError:
+                    raise self.fail(
+                        f"set '{decl.name}' is an int set, so '{element}' is not a valid element",
+                        decl,
+                        hint="int sets hold whole numbers, so the compiler can do arithmetic "
+                             "on their indices",
+                    ) from None
+        for key in decl.labels:
+            if key not in decl.elements:
+                raise self.fail(f"set '{decl.name}' has no element '{key}' to label", decl,
+                                hint=did_you_mean(key, decl.elements))
+        return ProblemSet(
+            name=decl.name, kind=decl.kind, elements=decl.elements,
+            labels=decl.labels, entity_type=decl.entity_type, description=decl.description,
+        )
+
+    def _param(self, decl: nodes.ParamDecl) -> ProblemParameter:
+        values = []
+        for index, value in decl.values:
+            for position, element in enumerate(index):
+                set_name = decl.index_sets[position]
+                if element not in self.sets[set_name].elements:
+                    raise self.fail(
+                        f"'{element}' is not in set '{set_name}', which indexes "
+                        f"parameter '{decl.name}'",
+                        decl,
+                        hint=did_you_mean(element, self.sets[set_name].elements),
+                    )
+            values.append(ParameterValue(index=index, value=value,
+                                         origin=SourceRef(source=self.origin)))
+        return ProblemParameter(
+            name=decl.name, index_sets=decl.index_sets, values=values,
+            default=decl.default, unit=decl.unit, description=decl.description,
+        )
+
+    def _var(self, decl: nodes.VarDecl) -> ProblemVariable:
+        return ProblemVariable(
+            name=decl.name, index_sets=decl.index_sets, kind=decl.kind,
+            lb=decl.lb, ub=decl.ub, description=decl.description,
+            decision_meaning=decl.meaning,
+        )
+
+    def _constraint(self, decl: nodes.ConstraintDecl) -> ProblemConstraint:
+        if decl.category not in CATEGORIES:
+            raise self.fail(
+                f"'{decl.category}' is not a constraint category", decl,
+                hint="use one of " + ", ".join(sorted(CATEGORIES)),
+            )
+        scope = {b.index: b.set_name for b in decl.forall}
+        for binding in decl.forall:
+            self._known_set(binding.set_name, binding)
+        return ProblemConstraint(
+            name=decl.name,
+            statement=decl.statement,
+            category=decl.category,
+            rationale=decl.rationale,
+            forall=[IrBinding(index=b.index, set=b.set_name) for b in decl.forall],
+            where=self._predicate(decl.where, scope) if decl.where else None,
+            rel=Rel(op=decl.op,
+                    lhs=self._expression(decl.lhs, scope),
+                    rhs=self._expression(decl.rhs, scope)),
+        )
+
+    def _objective(self, decl: nodes.ObjectiveDecl) -> ProblemObjective:
+        return ProblemObjective(
+            name=decl.name, statement=decl.statement, sense=decl.sense,
+            weight=decl.weight, unit=decl.unit, expr=self._expression(decl.expr, {}),
+        )
+
+    def _assumption(self, decl: nodes.AssumeDecl) -> Assumption:
+        return Assumption(key=decl.key, statement=decl.statement,
+                          rationale=decl.rationale, affects=decl.affects)
+
+    def _scenario(self, decl: nodes.ScenarioDecl) -> Scenario:
+        overrides: list[ScenarioOverride] = []
+        for override in decl.overrides:
+            if override.parameter not in self.params:
+                raise self.fail(f"unknown parameter '{override.parameter}'", override,
+                                hint=did_you_mean(override.parameter, self.params))
+            param = self.params[override.parameter]
+            if override.index is None:
+                # No subscript means every value the parameter declares — the
+                # usual case, since "demand up 30%" means all of it.
+                targets = [index for index, _ in param.values] or [[]]
+            else:
+                targets = [override.index]
+            for index in targets:
+                overrides.append(ScenarioOverride(
+                    parameter=override.parameter, index=index,
+                    value=override.value, scale=override.scale,
+                ))
+        return Scenario(key=decl.key, name=decl.name,
+                        description=decl.description, overrides=overrides)
+
+    # --------------------------------------------------------- expressions
+
+    def _expression(self, node, scope: dict[str, str]):
+        if isinstance(node, nodes.Num):
+            return Const(value=node.value)
+        if isinstance(node, nodes.Text):
+            return Lit(value=node.value)
+        if isinstance(node, nodes.Word):
+            return self._word(node, scope)
+        if isinstance(node, nodes.Lookup):
+            return self._lookup(node, scope)
+        if isinstance(node, nodes.Unary):
+            return Neg(arg=self._expression(node.arg, scope))
+        if isinstance(node, nodes.Arith):
+            args = [self._expression(a, scope) for a in node.args]
+            if node.op == "/":
+                if len(args) != 2:
+                    raise self.fail("division takes exactly two operands", node)
+                return Div(args=args)
+            return {"+": Add, "-": Sub, "*": Mul}[node.op](args=args)
+        if isinstance(node, nodes.Aggregate):
+            inner = dict(scope)
+            for binding in node.bindings:
+                self._known_set(binding.set_name, binding)
+                inner[binding.index] = binding.set_name
+            return Sum(
+                over=[IrBinding(index=b.index, set=b.set_name) for b in node.bindings],
+                body=self._expression(node.body, inner),
+                where=self._predicate(node.where, inner) if node.where else None,
+            )
+        raise self.fail(f"cannot read {type(node).__name__} as a value", node)
+
+    def _word(self, node: nodes.Word, scope: dict[str, str]):
+        if node.name in scope:
+            return IdxRef(name=node.name)
+        if node.name in self.params:
+            declared = self.params[node.name]
+            if declared.index_sets:
+                raise self.fail(
+                    f"parameter '{node.name}' is indexed by "
+                    f"{', '.join(declared.index_sets)} and needs a subscript",
+                    node,
+                    hint=f"write {node.name}[{', '.join(declared.index_sets).lower()}]",
+                )
+            return ParamRef(name=node.name)
+        if node.name in self.vars:
+            declared = self.vars[node.name]
+            if declared.index_sets:
+                raise self.fail(
+                    f"variable '{node.name}' is indexed by "
+                    f"{', '.join(declared.index_sets)} and needs a subscript",
+                    node,
+                )
+            return VarRef(name=node.name)
+        if node.name in self.elements:
+            return Lit(value=node.name)
+        raise self.fail(
+            f"'{node.name}' is not an index, a parameter, a variable or a set element",
+            node,
+            hint=did_you_mean(
+                node.name,
+                [*scope, *self.params, *self.vars, *self.elements],
+            ),
+        )
+
+    def _lookup(self, node: nodes.Lookup, scope: dict[str, str]):
+        args = [self._expression(arg, scope) for arg in node.args]
+        if node.name in self.params:
+            declared, build = self.params[node.name], ParamRef
+            kind = "parameter"
+        elif node.name in self.vars:
+            declared, build = self.vars[node.name], VarRef
+            kind = "variable"
+        else:
+            raise self.fail(
+                f"'{node.name}' is not a declared parameter or variable", node,
+                hint=did_you_mean(node.name, [*self.params, *self.vars]),
+            )
+        if len(declared.index_sets) != len(args):
+            raise self.fail(
+                f"{kind} '{node.name}' takes {len(declared.index_sets)} subscript(s), "
+                f"given {len(args)}",
+                node,
+                hint=(f"it is indexed by {', '.join(declared.index_sets)}"
+                      if declared.index_sets else "it takes no subscript"),
+            )
+        return build(name=node.name, index=args)
+
+    # ---------------------------------------------------------- predicates
+
+    def _predicate(self, node, scope: dict[str, str]):
+        if isinstance(node, nodes.Compare):
+            return Cmp(op=node.op,
+                       lhs=self._expression(node.lhs, scope),
+                       rhs=self._expression(node.rhs, scope))
+        if isinstance(node, nodes.Logical):
+            args = [self._predicate(a, scope) for a in node.args]
+            return And(args=args) if node.op == "and" else Or(args=args)
+        if isinstance(node, nodes.Negate):
+            return Not(arg=self._predicate(node.arg, scope))
+        raise self.fail(f"cannot read {type(node).__name__} as a filter", node)
+
+
+def lower(program: nodes.Program, source: str = "", origin: str = "dsl") -> ProblemSpec:
+    return Lowering(program, source, origin).run()

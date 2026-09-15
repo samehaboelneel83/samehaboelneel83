@@ -215,3 +215,13 @@ export interface SolverDescription {
   module: string;
   capabilities: Record<string, boolean | string | null>;
 }
+
+export interface DslDiagnostic {
+  kind: "dsl" | "compile";
+  message: string;
+  line?: number;
+  column?: number;
+  hint?: string | null;
+  excerpt?: string | null;
+  where?: string | null;
+}

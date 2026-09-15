@@ -8,6 +8,7 @@
  */
 import type {
   CompileResponse,
+  ModelStatistics,
   ComparisonRow,
   Explanation,
   ProblemSpec,
@@ -118,6 +119,33 @@ export const api = {
     request<{ runs: Array<Record<string, unknown>> }>(
       `/runs${problem ? `?problem=${encodeURIComponent(problem)}` : ""}`,
     ),
+
+  dslCheck: (source: string) =>
+    request<{
+      key: string;
+      name: string;
+      statistics: ModelStatistics;
+      fingerprint: string;
+      structure: string | null;
+      warnings: string[];
+      summary: {
+        sets: Array<{ name: string; elements: number; kind: string }>;
+        parameters: string[];
+        variables: Array<{ name: string; kind: string }>;
+        constraints: Array<{ name: string; statement: string }>;
+        objectives: Array<{ name: string; sense: string }>;
+        assumptions: number;
+        scenarios: string[];
+      };
+    }>("/dsl/check", { method: "POST", body: JSON.stringify({ source }) }),
+  dslSave: (source: string) =>
+    request<{ key: string; id: string }>("/dsl/problems", {
+      method: "POST",
+      body: JSON.stringify({ source }),
+    }),
+  dslExport: (key: string) => request<{ source: string }>(`/dsl/problems/${key}`),
+  dslTemplate: (key: string) =>
+    request<{ template: string; title: string; source: string }>(`/dsl/templates/${key}`),
 
   entityTypes: () =>
     request<{ entity_types: Array<{ key: string; name: string; entities: number }> }>(

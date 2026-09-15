@@ -95,6 +95,36 @@ already carry what an OpenLineage exporter would need.
 React · FastAPI · PostgreSQL (JSONB, ltree, PostGIS) · Keycloak · OR-Tools
 CP-SAT · HiGHS · NetworkX · SimPy
 
+## Authoring problems
+
+A problem class can be written as text rather than Python:
+
+```
+problem crew_cover "Crew coverage"
+
+set Crews = alpha, bravo, charlie
+set Shifts = morning, evening, night
+param cost[Crews] = { alpha: 3, bravo: 2, charlie: 4 }
+var assign[Crews, Shifts] binary means "Put this crew on this shift"
+
+constraint cover "Every shift gets the crews it needs"
+  forall s in Shifts:
+    sum(assign[c, s] for c in Crews) >= needed[s]
+
+minimize crew_cost "Use the cheapest crews" unit "cost units":
+  sum(cost[c] * assign[c, s] for c in Crews, s in Shifts)
+
+assume crews_interchangeable "Any qualified crew covers a shift equally well"
+scenario crew_lost "One crew unavailable"
+  set qualified[alpha, morning] to 0
+```
+
+It compiles to the same Problem Model the templates produce, so it inherits
+assumptions, scenarios, provenance, labels and explanations without asking.
+Every built-in template can be read back as source (`GET /api/dsl/templates/{key}`),
+which is the fastest way to learn the language — and there is a test asserting
+all six survive the round trip with an identical model fingerprint.
+
 ## Problem templates
 
 `resource_allocation` · `assignment` · `scheduling` · `transportation` ·

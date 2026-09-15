@@ -114,12 +114,18 @@ def cmp(op: str, lhs, rhs) -> Cmp:
     return Cmp(op=op, lhs=_coerce(lhs), rhs=_coerce(rhs))
 
 
-def all_of(*preds) -> And:
-    return And(args=list(preds))
+def all_of(*preds):
+    """Conjunction. A single condition is returned as itself.
+
+    Wrapping one predicate in a one-element ``And`` is noise: it reads the same,
+    compiles the same, and only shows up as a spurious difference when a model
+    is written out and read back."""
+    return preds[0] if len(preds) == 1 else And(args=list(preds))
 
 
-def any_of(*preds) -> Or:
-    return Or(args=list(preds))
+def any_of(*preds):
+    """Disjunction. A single condition is returned as itself."""
+    return preds[0] if len(preds) == 1 else Or(args=list(preds))
 
 
 def not_(pred) -> Not:

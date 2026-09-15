@@ -274,3 +274,91 @@ def test_template_rejects_impossible_data_with_422(client):
     response = client.post("/api/problems", json={"template": "vehicle_routing", "data": example})
     assert response.status_code == 422
     assert "capacity" in response.json()["detail"]
+
+
+def test_a_problem_can_be_written_checked_saved_and_solved(client):
+    source = """
+problem crew_cover "Crew coverage"
+  "Cover every shift with the fewest crews."
+
+set Crews = alpha, bravo, charlie
+set Shifts = morning, evening, night
+
+param cost[Crews] = { alpha: 3, bravo: 2, charlie: 4 }
+param qualified[Crews, Shifts] default 1 = { (charlie, night): 0 }
+param needed[Shifts] default 1
+
+var assign[Crews, Shifts] binary means "Put this crew on this shift"
+
+constraint cover "Every shift gets the crews it needs"
+  forall s in Shifts:
+    sum(assign[c, s] for c in Crews) >= needed[s]
+
+constraint one_shift "No crew works two shifts"
+  category physical
+  forall c in Crews:
+    sum(assign[c, s] for s in Shifts) <= 1
+
+constraint only_qualified "A crew is only put on shifts it is qualified for"
+  category regulatory
+  forall c in Crews, s in Shifts:
+    assign[c, s] <= qualified[c, s]
+
+minimize crew_cost "Use the cheapest crews" unit "cost units":
+  sum(cost[c] * assign[c, s] for c in Crews, s in Shifts)
+
+assume crews_interchangeable "Any qualified crew covers a shift equally well"
+"""
+    checked = client.post("/api/dsl/check", json={"source": source})
+    assert checked.status_code == 200, checked.text
+    body = checked.json()
+    assert body["key"] == "crew_cover"
+    assert body["statistics"]["variables"] == 9
+    assert [c["name"] for c in body["summary"]["constraints"]] == [
+        "cover", "one_shift", "only_qualified",
+    ]
+
+    created = client.post("/api/dsl/problems", json={"source": source})
+    assert created.status_code == 201, created.text
+
+    solved = client.post("/api/problems/crew_cover/solve", json={}).json()
+    assert solved["solution"]["status"] == "optimal"
+    # Three shifts, one crew each, and charlie cannot take the night.
+    assert len(solved["solution"]["decisions"]) == 3
+    placed = {tuple(d["index"]) for d in solved["solution"]["decisions"]}
+    assert ("charlie", "night") not in placed
+
+
+def test_a_language_error_comes_back_located(client):
+    response = client.post("/api/dsl/check", json={
+        "source": 'problem p\nset A = a\nvar v[A] binary\nconstraint c "s"\n'
+                  '  forall i in A: v[i] <= suply[i]\n',
+    })
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["kind"] == "dsl"
+    assert detail["line"] == 5
+    assert "not a declared parameter" in detail["message"]
+    # Without the excerpt the author is hunting; with it the caret is on the word.
+    assert "suply" in detail["excerpt"]
+
+
+def test_every_template_can_be_read_as_source(client):
+    listed = client.get("/api/templates").json()["templates"]
+    for template in listed:
+        body = client.get(f"/api/dsl/templates/{template['key']}").json()
+        assert body["source"].startswith("problem ")
+        # What comes back must itself be valid input.
+        assert client.post("/api/dsl/check", json={"source": body["source"]}).status_code == 200
+
+
+def test_a_stored_problem_can_be_read_back_as_source(client):
+    example = client.get("/api/templates/assignment/example").json()["data"]
+    example["key"] = "export-me"
+    client.post("/api/problems", json={"template": "assignment", "data": example})
+
+    body = client.get("/api/dsl/problems/export-me").json()
+    # The key contains a hyphen, so the writer quotes it — bare export-me would
+    # read as a subtraction — and the parser has to accept it back.
+    assert 'problem "export-me"' in body["source"]
+    assert client.post("/api/dsl/check", json={"source": body["source"]}).status_code == 200
