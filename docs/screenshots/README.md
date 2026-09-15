@@ -8,20 +8,26 @@ They are here because a claim about a platform is cheap and a screen of it doing
 the thing is not. Every number below appears in the images; none of them was
 typed into a mock.
 
-They were re-taken when the model's balance objective changed from a range to a
-variance, because screenshots that no longer show the model are worse than no
-screenshots at all.
+They are re-taken whenever they stop showing the platform, because a screenshot
+that no longer matches is worse than none. This set is from after the six
+roadmap phases: soft constraints, infeasibility diagnosis, hierarchies as a
+construct, the counted vocabulary, conditional rules and domain binding.
 
 ### 1. Domain — [`1-domain.png`](1-domain.png)
 
-The entity types this organisation reasons about, with `unit` selected: all seven
-nodes of the tree, each carrying its level, its parent, and how many leaf units
-sit beneath it. That last number is the shape `unit_overlap` is built from.
+The entity types this organisation reasons about, with `unit` selected: all
+seven nodes of the tree, each carrying its level and its parent.
+
+Above them, the relationships — `reports_to` and `specialises`, six links each.
+These are the tables that had no code at all until the domain was bound to the
+problem model, and the right-hand column is the point: a problem can write
+`hierarchy Units by parent … from reports_to` and take the tree from here
+rather than restating it.
 
 ### 2. Author — [`2-author.png`](2-author.png)
 
 The model as text, checked. It compiles to 1,360 columns, 464 rows and 23,182
-non-zeros, fingerprint `c92f69f4de0d`. The rules are read back in English, so the
+non-zeros, fingerprint `37c4c0bc242c`. The rules are read back in English, so the
 screen states what the model means without anyone reading the algebra.
 
 ### 3. Problem — [`3-problem.png`](3-problem.png)
@@ -34,6 +40,12 @@ is believed. The parameter table names the source of every value.
 
 Compile only; nothing is solved here. The fingerprint matches the Author screen,
 which is the point of having one.
+
+The fingerprint has moved since these screenshots were first taken, and the
+column, row and non-zero counts have not. That is the distinction the platform
+now draws between its two identities: the fingerprint hashes the problem model
+as it is spelled, and every field the IR gained over six phases moved it, while
+the *system* — what actually gets solved — never changed.
 
 The kind reads **Discrete, quadratic**, and that one word decides the engine.
 Balance in this model is a variance, so the objective carries degree-two terms,
