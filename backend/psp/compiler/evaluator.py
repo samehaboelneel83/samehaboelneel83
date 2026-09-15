@@ -68,7 +68,12 @@ class Quadratic:
     constant: float = 0.0
     terms: dict[str, float] = field(default_factory=dict)
     # Keyed by an ordered pair of variable keys, so ``x*y`` and ``y*x`` land on
-    # the same coefficient rather than becoming two terms that cancel badly.
+    # one coefficient rather than two entries.
+    #
+    # This is canonicalisation, not correctness: both engines symmetrise, so the
+    # unordered form gives the same answer. What it buys is one representation
+    # for one objective — which matters because the flat signature is what
+    # regression tests pin, and because it halves the terms a solver is handed.
     quad: dict[tuple[str, str], float] = field(default_factory=dict)
 
     @property

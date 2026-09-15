@@ -54,7 +54,7 @@ def flatten(model: IRModel) -> FlatModel:
         return priced.constant
 
     def give_room(
-        c: IRConstraint, key: str, body, price: float
+        c: IRConstraint, key: str, body, price: float, rhs: float
     ) -> tuple[dict[str, float], list[str]]:
         """Add the columns that let one row of a soft family be broken.
 
@@ -71,7 +71,10 @@ def flatten(model: IRModel) -> FlatModel:
             slack = f"~{role}[{key}]"
             columns[slack] = FlatVar(
                 key=slack, name=f"~{role}", index=[c.name, *_index_of(key, c.name)],
-                kind=kind, lb=0.0, ub=_violation_bound(role, reach, -body.constant),
+                # Against the row's actual right-hand side, which a condition
+                # will have moved. Reading it off the body instead leaves the
+                # bound valid but slack, and the bound exists to be tight.
+                kind=kind, lb=0.0, ub=_violation_bound(role, reach, rhs),
                 role="violation",
             )
             terms[slack] = coefficient
@@ -112,7 +115,7 @@ def flatten(model: IRModel) -> FlatModel:
             price: float | None = None
             if c.soft:
                 price = price_of(c, env, key)
-                room, violation_keys = give_room(c, key, body, price)
+                room, violation_keys = give_room(c, key, body, price, rhs_value)
                 terms.update(room)
             rows.append(
                 FlatConstraint(

@@ -233,3 +233,56 @@ def test_a_range_and_a_variance_disagree_about_which_plan_is_balanced():
         return sum((x - mean) ** 2 for x in loads)
 
     assert spread(even) > spread(lopsided)
+
+
+def test_the_same_pair_written_both_ways_round_is_one_term():
+    """Canonicalisation, and only that — mutation testing showed the unordered
+    form gives the same answer, because both engines symmetrise. What it buys is
+    one representation for one objective, which is what makes the flat signature
+    a stable thing to pin, and half as many terms to hand a solver.
+    """
+    both_ways = compile_and_flatten(parse_problem("""
+problem q "Q"
+  "The same pair of decisions multiplied both ways round."
+set Crews = north, south of crew
+var work[Crews] continuous in [0, 10] means "Work"
+constraint enough "At least four units happen"
+  sum(work[c] for c in Crews) >= 4
+minimize cost "Squared total" unit "squared":
+  sum(work[c] * work[c] for c in Crews) +
+    work[north] * work[south] + work[south] * work[north]
+""")).flat
+    terms = {(t.i, t.j): t.coef for t in both_ways.objective.quadratic}
+    assert len(terms) == 3, "the cross term was kept twice"
+    assert terms[("work[north]", "work[south]")] == pytest.approx(2.0)
+
+    # And it is the right model: (x + y)^2 against x + y >= 4 is 16.
+    result, _ = run_solver(both_ways, options=OPTIONS)
+    assert result.objective_value == pytest.approx(16.0)
+
+
+def test_a_product_whose_factors_can_go_negative():
+    """CP-SAT needs a range for every product it builds, and a product of two
+    ranges is not monotone once either can go negative — the extremes come from
+    all four corners, not from pairing the two lows and the two highs.
+
+    Mutation testing found this claim untested: every quadratic model here held
+    non-negative variables, where the two spellings agree. Worked by hand: with
+    a + b = 2 and both in [-4, 4], a ranges over [-2, 4] and a*b = 2a - a^2 is
+    least at either end, so the answer is -8.
+    """
+    compiled = compile_and_flatten(parse_problem("""
+problem swing "Swing"
+  "Two adjustments that must cancel, and a product that pays for spread."
+set Sides = left, right of side
+var adjust[Sides] integer in [-4, 4] means "Adjustment on this side"
+constraint they_sum_to_two "The adjustments come to two"
+  sum(adjust[s] for s in Sides) == 2
+minimize paired "The product of the two adjustments" unit "squared":
+  adjust[left] * adjust[right]
+"""))
+    result, meta = run_solver(compiled.flat, options=OPTIONS)
+    assert meta["solver"] == "cpsat"
+    assert result.status == SolveStatus.OPTIMAL
+    assert result.objective_value == pytest.approx(-8.0)
+    assert {result.values["adjust[left]"], result.values["adjust[right]"]} == {-2.0, 4.0}

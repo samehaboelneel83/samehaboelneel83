@@ -269,3 +269,36 @@ def test_a_solve_returns_the_same_plan_in_a_different_process():
         runs.append(finished.stdout.strip())
     assert runs[0].split()[1] == "optimal"
     assert runs[0] == runs[1], "the same model gave two different plans"
+
+
+def test_an_engine_that_cannot_represent_the_data_says_so_before_running():
+    """Capability is checked before a run, not discovered during one.
+
+    CP-SAT works in exact integer arithmetic, so a coefficient that will not
+    scale to a whole number is something it cannot take. Until this was a
+    capability the registry called it eligible, chose it, and returned an error
+    from inside the solve — while HiGHS, also eligible, would have answered.
+    """
+    from psp.dsl import parse_problem
+
+    compiled = compile_and_flatten(parse_problem('''
+problem awkward "Awkward"
+  "One coefficient that no common multiplier makes whole."
+set A = a, b of thing
+param w[A] = { a: 1000000, b: 0.0000001 }
+var v[A] binary means "Take it"
+constraint at_least_one "At least one is taken"
+  sum(v[i] for i in A) >= 1
+minimize cost "What it costs" unit "cost":
+  sum(w[i] * v[i] for i in A)
+'''))
+    result, meta = run_solver(compiled.flat, options=OPTIONS)
+
+    cpsat = next(c for c in meta["considered"] if c["solver"] == "cpsat")
+    assert cpsat["eligible"] is False
+    assert "exact integer arithmetic" in cpsat["reason"]
+    assert "1e-07" in cpsat["reason"], "the refusal does not name the coefficient"
+
+    # And the model is still solved, by the engine that can take it.
+    assert meta["solver"] == "highs"
+    assert result.status == SolveStatus.OPTIMAL

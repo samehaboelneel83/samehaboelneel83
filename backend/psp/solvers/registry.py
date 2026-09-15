@@ -29,6 +29,7 @@ _REGISTRY: dict[str, tuple[str, str, Capabilities]] = {
         Capabilities(
             continuous=False, integer=True, binary=True, duals=False,
             quadratic_objective=True, requires_bounded_integers=True,
+            requires_rational_data=True,
         ),
     ),
     "networkx": (

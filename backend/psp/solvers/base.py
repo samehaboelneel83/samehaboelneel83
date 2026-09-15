@@ -42,6 +42,9 @@ class Capabilities(BaseModel):
     non-convex objective is not merely slow but meaningless to it."""
     requires_structure: str | None = None
     requires_bounded_integers: bool = False
+    requires_rational_data: bool = False
+    """Set where the engine works in exact integer arithmetic and so needs every
+    coefficient to scale to a whole number within :data:`RATIONAL_SCALE_LIMIT`."""
 
 
 #: Workers a solve gets unless it asks for otherwise. Fixed, not taken from the
@@ -50,6 +53,10 @@ class Capabilities(BaseModel):
 #: Four is enough to change the answer from "feasible" to "proved optimal" on
 #: the models here and small enough to leave a server room to serve.
 DEFAULT_THREADS = 4
+
+#: Largest common multiplier an exact-arithmetic engine may need to turn every
+#: coefficient in a model into a whole number.
+RATIONAL_SCALE_LIMIT = 10**6
 
 
 class SolveOptions(BaseModel):
@@ -73,6 +80,32 @@ class SolveResult(BaseModel):
     message: str | None = None
     log: list[str] = Field(default_factory=list)
     diagnostics: dict = Field(default_factory=dict)
+
+
+def _unrepresentable(model: FlatModel) -> float | None:
+    """The first coefficient an exact-arithmetic engine could not take.
+
+    Checked here rather than found inside a solve, because an engine that
+    cannot represent a model has not accepted it — and until this was a
+    capability, the registry would choose CP-SAT, fail mid-run, and return an
+    error while a capable engine sat unused. Distinct values only: models carry
+    tens of thousands of coefficients and a handful of different ones.
+    """
+    from fractions import Fraction
+
+    values = set()
+    for row in model.constraints:
+        values.update(row.terms.values())
+        values.add(row.rhs)
+    values.update(model.objective.terms.values())
+    values.update(term.coef for term in model.objective.quadratic)
+    for value in values:
+        fraction = Fraction(value).limit_denominator(RATIONAL_SCALE_LIMIT)
+        if abs(float(fraction) - value) > 1e-9 * max(1.0, abs(value)):
+            return value
+        if fraction.denominator > RATIONAL_SCALE_LIMIT:
+            return value
+    return None
 
 
 class SolverAdapter:
@@ -120,6 +153,14 @@ class SolverAdapter:
             for v in model.variables:
                 if v.kind in ("integer", "binary") and v.ub is None:
                     return False, f"{self.name} requires a finite upper bound on '{v.key}'"
+        if caps.requires_rational_data:
+            awkward = _unrepresentable(model)
+            if awkward is not None:
+                return False, (
+                    f"{self.name} works in exact integer arithmetic, and the "
+                    f"coefficient {awkward!r} does not scale to a whole number "
+                    f"within {RATIONAL_SCALE_LIMIT}"
+                )
         return True, None
 
     def solve(self, model: FlatModel, options: SolveOptions) -> SolveResult:  # pragma: no cover

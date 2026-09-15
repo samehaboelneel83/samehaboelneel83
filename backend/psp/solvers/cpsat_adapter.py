@@ -14,9 +14,11 @@ import time
 from fractions import Fraction
 
 from psp.compiler.flat import FlatModel
-from psp.solvers.base import Capabilities, SolveOptions, SolverAdapter, SolveResult, SolveStatus
+from psp.solvers.base import (
+    RATIONAL_SCALE_LIMIT, Capabilities, SolveOptions, SolverAdapter, SolveResult, SolveStatus,
+)
 
-MAX_SCALE = 10**6
+MAX_SCALE = RATIONAL_SCALE_LIMIT
 
 
 class CpSatAdapter(SolverAdapter):
@@ -27,6 +29,7 @@ class CpSatAdapter(SolverAdapter):
         return Capabilities(
             continuous=False, integer=True, binary=True, duals=False,
             quadratic_objective=True, requires_bounded_integers=True,
+            requires_rational_data=True,
         )
 
     def solve(self, model: FlatModel, options: SolveOptions) -> SolveResult:
