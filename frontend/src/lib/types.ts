@@ -138,6 +138,18 @@ export interface ConstraintOutcome {
   marginal_objective: string | null;
 }
 
+export interface Violation {
+  key: string;
+  name: string;
+  statement: string | null;
+  index: string[];
+  label: string | null;
+  amount: number;
+  direction: "over" | "under";
+  penalty: number;
+  cost: number;
+}
+
 export interface Solution {
   status: string;
   solver: string;
@@ -145,6 +157,7 @@ export interface Solution {
   decisions: Decision[];
   binding_constraints: ConstraintOutcome[];
   slack_constraints: ConstraintOutcome[];
+  violations: Violation[];
   duals_available: boolean;
   duals_unavailable_reason: string | null;
   wall_time_seconds: number;

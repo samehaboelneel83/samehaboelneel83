@@ -147,6 +147,7 @@ class ConstraintDecl(Located):
     name: str = ""
     statement: str = ""
     category: str = "operational"
+    penalty: float | None = None
     rationale: str | None = None
     forall: list[Binding] = field(default_factory=list)
     where: Any = None

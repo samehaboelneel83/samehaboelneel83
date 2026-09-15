@@ -89,7 +89,7 @@ def compile_problem(
     for c in spec.constraints:
         constraints.append(
             IRConstraint(name=c.name, forall=c.forall, where=c.where, rel=c.rel,
-                         statement=c.statement, origin=c.category)
+                         statement=c.statement, origin=c.category, penalty=c.penalty)
         )
         record.mappings.append(
             Mapping("constraint", c.name, "constraint", c.name, statement=c.statement,

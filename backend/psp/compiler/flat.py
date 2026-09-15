@@ -28,6 +28,10 @@ class FlatVar(BaseModel):
     kind: VarKind
     lb: float
     ub: float | None = None
+    role: Literal["decision", "violation"] = "decision"
+    """``violation`` marks a column the compiler added to let a soft constraint
+    be broken. It is a real column to the solver and not a decision to anyone
+    else, so it is reported as a violation rather than as something chosen."""
 
 
 class FlatConstraint(BaseModel):
@@ -38,6 +42,11 @@ class FlatConstraint(BaseModel):
     rhs: float
     index: list[str] = Field(default_factory=list)
     statement: str | None = None
+    penalty: float | None = None
+    violation_keys: list[str] = Field(default_factory=list)
+    """Columns in ``terms`` that measure how far this row is broken. They are
+    named so that reporting can subtract them back out: the activity worth
+    showing is the one the model stated, not the one the slack made feasible."""
 
 
 class QuadTerm(BaseModel):

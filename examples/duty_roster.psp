@@ -1,0 +1,100 @@
+# A duty roster, and what it costs to break a rule.
+#
+# Every other model in this repository states rules that hold absolutely. Real
+# rosters are not like that: the cover has to be found, and the question is not
+# whether some rule gives way but which one, and at what price.
+#
+# So the rules here are soft. Each carries the cost of one unit of violation,
+# and those costs are the whole objective — there is nothing else to minimise.
+# The plan that comes back is the cheapest set of broken promises, and every
+# break is reported with its size and its price rather than being absorbed
+# silently into an answer that looks clean.
+#
+#   every_day_is_covered   50   leaving a day with nobody on it
+#   honour_days_off        20   putting someone on a day they asked off
+#   spread_the_week         6   giving one person a second day
+#
+# The ordering is the point. A day with no cover is worse than an overridden
+# request, which is worse than an uneven week — and because the costs say so,
+# the model can be handed an impossible week and still return the plan a
+# sensible person would have written.
+
+problem duty_roster "Duty roster"
+  "Cover every weekday with one person, honouring requests and spreading the "
+  "load where it is possible to do both."
+
+set People = ada, bram, cleo of person
+set Days = mon, tue, wed, thu, fri of day
+
+param asked_off[People, Days] default 0 "1 when they asked not to work that day" = {
+    (ada, mon): 1, (bram, mon): 1, (cleo, mon): 1 }
+
+param available[People, Days] default 1 "1 when they can work at all that day"
+
+param personal_limit[People] default 2 "Most days anyone may be given in a week"
+
+var on_duty[People, Days] binary means "Put this person on duty this day"
+
+# ------------------------------------------------------------- hard rules
+
+constraint only_when_available "Nobody is put on duty on a day they cannot work"
+  category physical
+  because "A request can be overridden and an absence cannot, which is the "
+          "difference between a rule with a price and a rule without one"
+  forall p in People, d in Days where available[p, d] == 0:
+    on_duty[p, d] == 0
+
+constraint within_personal_limit "Nobody is given more days than their limit"
+  category regulatory
+  forall p in People:
+    sum(on_duty[p, d] for d in Days) <= personal_limit[p]
+
+# ------------------------------------------------------------- soft rules
+
+constraint every_day_is_covered "Each weekday has exactly one person on duty"
+  category operational
+  soft penalty 50
+  because "A gap in the cover is the worst outcome here, so it is priced above "
+          "everything else rather than declared impossible"
+  forall d in Days:
+    sum(on_duty[p, d] for p in People) == 1
+
+constraint honour_days_off "Nobody works a day they asked off"
+  category policy
+  soft penalty 20
+  because "Requests are kept unless keeping them would leave a day uncovered"
+  sum(on_duty[p, d] for p in People, d in Days where asked_off[p, d] == 1) == 0
+
+constraint spread_the_week "Nobody works more than one day in the week"
+  category policy
+  soft penalty 6
+  because "Five days across three people cannot all be single days, so this is "
+          "a preference that is expected to be broken — twice — and priced to "
+          "be broken last"
+  forall p in People:
+    sum(on_duty[p, d] for d in Days) <= 1
+
+# ------------------------------------------------------------ assumptions
+
+assume the_costs_are_on_one_scale "The three penalties are comparable amounts"
+  because "They are summed, so a gap in the cover being priced at fifty means "
+          "it is worth two and a half overridden requests and no less"
+  affects every_day_is_covered, honour_days_off, spread_the_week
+
+assume a_rule_is_broken_by_as_little_as_possible "Violation is measured as a "
+                                                 "distance, not as a flag"
+  because "Charging per unit means a rule missed by one is charged once; "
+          "charging per rule would make the second break free"
+  affects every_day_is_covered, spread_the_week
+
+# --------------------------------------------------------------- scenarios
+
+scenario short_handed "One person is away all week"
+  "Two people cannot cover five days within their limits, so the week cannot be "
+  "fully staffed. The plan does not fail: it leaves the cheapest day uncovered, "
+  "which is Monday, because covering Monday would break a request as well."
+  set available[cleo, mon] to 0
+  set available[cleo, tue] to 0
+  set available[cleo, wed] to 0
+  set available[cleo, thu] to 0
+  set available[cleo, fri] to 0

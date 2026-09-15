@@ -124,6 +124,53 @@ convex optimisation there, so a non-convex discrete objective is ordinary work.
 
 ---
 
+### A rule is hard unless someone prices breaking it
+
+Soft constraints are opt-in, by writing `soft penalty 20` on the rule. There is
+no global "relax when infeasible" switch and no default penalty.
+
+A default would decide, on the modeller's behalf, that every rule is negotiable
+— and the first time it mattered, a plan would come back having quietly broken
+a regulation because breaking it was cheaper than the alternative nobody had
+priced. Hardness is the safe default because its failure mode is an error
+message, and softness is the unsafe one because its failure mode is a confident
+answer.
+
+A penalty of zero is refused for the same reason: a rule that is free to break
+is not a rule, and writing one is more likely to be a mistake than an intent.
+
+---
+
+### Violation is a distance, not a flag
+
+A broken rule is charged per unit it is missed by, not once for being broken.
+
+Charging per rule makes the second unit of violation free, which is exactly
+backwards: a roster missing one shift and a roster missing four would cost the
+same, and the optimiser would have no reason to prefer the first. Per-unit
+charging also gives the number a meaning outside the objective — "short by
+three" is something a planner can act on.
+
+The consequence is that an equality needs two slack columns rather than one,
+since it can be missed in either direction and both misses are distances.
+
+---
+
+### The slack a soft constraint needs is bounded and, where it can be, integral
+
+The obvious implementation of a soft constraint adds a continuous, unbounded
+slack column. Either property would quietly cost a discrete model its engine:
+CP-SAT requires a fully discrete model and a finite bound on every integer, so
+the first rule to become soft would have moved the model to HiGHS without
+anyone asking.
+
+So the column is integral when the row can only be missed by whole numbers, and
+its bound is what the row's own columns can actually reach. Both are derived,
+neither is asked of the author, and the test that holds them is that the duty
+roster still chooses CP-SAT.
+
+---
+
 ### An explicitly requested solver is never substituted
 
 Falling back to a capable engine when the requested one cannot take the model

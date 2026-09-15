@@ -10,7 +10,7 @@ from __future__ import annotations
 from psp.compiler.errors import CompileError, DomainError
 from psp.compiler.evaluator import Affine, Evaluator, Quadratic
 from psp.compiler.flat import FlatConstraint, FlatModel, FlatObjective, FlatVar, QuadTerm
-from psp.ir.model import IRModel, IRVar
+from psp.ir.model import IRConstraint, IRModel, IRVar
 
 
 def flatten(model: IRModel) -> FlatModel:
@@ -27,6 +27,33 @@ def flatten(model: IRModel) -> FlatModel:
 
     ev = Evaluator(model, on_var=materialise)
     rows: list[FlatConstraint] = []
+    # Slack column key -> what one unit of it costs. Collected while the rows
+    # are expanded and charged to the objective once they all exist.
+    penalties: dict[str, float] = {}
+
+    def give_room(c: IRConstraint, key: str, body) -> tuple[dict[str, float], list[str]]:
+        """Add the columns that let one row of a soft family be broken.
+
+        A ``<=`` row can only be broken upwards and a ``>=`` row only
+        downwards, so each needs one column. An equality can miss in either
+        direction and needs two, which is also why a violation is reported as a
+        distance rather than a signed residual.
+        """
+        kind = _violation_kind(c, body, columns)
+        reach = _row_reach(body, columns)
+        added: list[str] = []
+        terms: dict[str, float] = {}
+        for role, coefficient in _violation_columns(c.rel.op):
+            slack = f"~{role}[{key}]"
+            columns[slack] = FlatVar(
+                key=slack, name=f"~{role}", index=[c.name, *_index_of(key, c.name)],
+                kind=kind, lb=0.0, ub=_violation_bound(role, reach, -body.constant),
+                role="violation",
+            )
+            terms[slack] = coefficient
+            penalties[slack] = c.penalty
+            added.append(slack)
+        return terms, added
 
     for c in model.constraints:
         seen: set[str] = set()
@@ -52,19 +79,26 @@ def flatten(model: IRModel) -> FlatModel:
                         where=c.name,
                     )
                 continue
+            terms = dict(body.terms)
+            violation_keys: list[str] = []
+            if c.soft:
+                room, violation_keys = give_room(c, key, body)
+                terms.update(room)
             rows.append(
                 FlatConstraint(
                     key=key,
                     name=c.name,
-                    terms=dict(body.terms),
+                    terms=terms,
                     op=c.rel.op,
                     rhs=-body.constant,
                     index=index,
                     statement=c.statement,
+                    penalty=c.penalty,
+                    violation_keys=violation_keys,
                 )
             )
 
-    objective, components = _flatten_objectives(model, ev)
+    objective, components = _flatten_objectives(model, ev, penalties)
 
     # Guarantee every declared variable that the objective or a bound needs is a
     # column, then order columns deterministically.
@@ -85,7 +119,74 @@ def flatten(model: IRModel) -> FlatModel:
     )
 
 
-def _flatten_objectives(model: IRModel, ev: Evaluator) -> tuple[FlatObjective, list[dict]]:
+def _violation_columns(op: str) -> list[tuple[str, float]]:
+    """Which slack columns a row of this shape needs, and with what sign.
+
+    ``lhs - shortfall <= rhs`` lets the left side run over; ``lhs + shortfall
+    >= rhs`` lets it fall under; an equality gets one of each. In every case
+    the column itself is non-negative, so its value *is* the violation.
+    """
+    if op == "le":
+        return [("over", -1.0)]
+    if op == "ge":
+        return [("under", 1.0)]
+    return [("under", 1.0), ("over", -1.0)]
+
+
+def _violation_kind(c: IRConstraint, body, columns: dict[str, FlatVar]) -> str:
+    """Integer where the row can only be missed by whole numbers.
+
+    This is not a refinement. A continuous slack added to an otherwise discrete
+    model makes it mixed, and a mixed model is one CP-SAT will refuse — so a
+    soft constraint would quietly cost a discrete problem its engine.
+    """
+    integral = all(
+        columns[key].kind in ("binary", "integer") and float(coef).is_integer()
+        for key, coef in body.terms.items()
+        if key in columns
+    )
+    return "integer" if integral and float(body.constant).is_integer() else "continuous"
+
+
+def _row_reach(body, columns: dict[str, FlatVar]) -> tuple[float | None, float | None]:
+    """How low and how high this row's left-hand side can reach.
+
+    Taken from the columns' own bounds. Used to cap the slack, which matters
+    more than it sounds: an unbounded column is one CP-SAT will not accept, so
+    leaving the cap off would cost a discrete model its engine the moment one
+    of its rules became soft.
+    """
+    lo = hi = 0.0
+    for key, coef in body.terms.items():
+        column = columns.get(key)
+        if column is None:
+            return None, None
+        low = coef * column.lb
+        high = None if column.ub is None else coef * column.ub
+        if high is None:
+            return (None, None) if coef > 0 else (None, None)
+        lo += min(low, high)
+        hi += max(low, high)
+    return lo, hi
+
+
+def _violation_bound(
+    role: str, reach: tuple[float | None, float | None], rhs: float
+) -> float | None:
+    lo, hi = reach
+    if role == "over":
+        return None if hi is None else max(0.0, hi - rhs)
+    return None if lo is None else max(0.0, rhs - lo)
+
+
+def _index_of(key: str, name: str) -> list[str]:
+    inside = key[len(name) + 1 : -1] if key.startswith(f"{name}[") else ""
+    return inside.split(",") if inside else []
+
+
+def _flatten_objectives(
+    model: IRModel, ev: Evaluator, penalties: dict[str, float] | None = None
+) -> tuple[FlatObjective, list[dict]]:
     """Combine weighted objectives into a single minimisation.
 
     Objectives are folded in the quadratic algebra. Most stay linear and the
@@ -111,6 +212,22 @@ def _flatten_objectives(model: IRModel, ev: Evaluator) -> tuple[FlatObjective, l
                 "terms": dict(quad.terms),
                 "quadratic": [[i, j, c] for (i, j), c in sorted(quad.quad.items())],
                 "constant": quad.constant,
+            }
+        )
+    if penalties:
+        # One component for every soft constraint together, rather than one per
+        # family: the objectives panel says what breaking rules cost in total,
+        # and which rules broke is a property of the rows, reported there.
+        total = total + Quadratic(0.0, dict(penalties))
+        components.append(
+            {
+                "name": "constraint_penalties",
+                "sense": "minimize",
+                "weight": 1.0,
+                "unit": "penalty points",
+                "terms": dict(penalties),
+                "quadratic": [],
+                "constant": 0.0,
             }
         )
     if not components:

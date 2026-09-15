@@ -8,6 +8,8 @@ turned out to be the ones that bit, and how much slack is left everywhere else.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from psp.compiler.pipeline import CompiledProblem
@@ -60,6 +62,27 @@ class ConstraintOutcome(BaseModel):
     marginal_objective: str | None = None
 
 
+class Violation(BaseModel):
+    """A soft constraint that was broken, and what breaking it cost.
+
+    Soft constraints exist so that a plan can be produced when every rule
+    cannot hold at once. That is only defensible if the breaks are reported as
+    plainly as the decisions, which is what this is for.
+    """
+
+    key: str
+    name: str
+    statement: str | None = None
+    index: list[str] = Field(default_factory=list)
+    label: str | None = None
+    amount: float
+    """How far the rule was missed, in the units of its own left-hand side."""
+    direction: Literal["over", "under"]
+    penalty: float
+    cost: float
+    """``amount * penalty`` — what this break contributed to the objective."""
+
+
 class Solution(BaseModel):
     status: str
     solver: str
@@ -67,6 +90,7 @@ class Solution(BaseModel):
     decisions: list[Decision] = Field(default_factory=list)
     binding_constraints: list[ConstraintOutcome] = Field(default_factory=list)
     slack_constraints: list[ConstraintOutcome] = Field(default_factory=list)
+    violations: list[Violation] = Field(default_factory=list)
     values: dict[str, float] = Field(default_factory=dict)
     duals_available: bool = False
     duals_unavailable_reason: str | None = None
@@ -105,7 +129,35 @@ def build_solution(compiled: CompiledProblem, result: SolveResult) -> Solution:
     binding, slack = _constraints(compiled, result)
     solution.binding_constraints = binding
     solution.slack_constraints = slack
+    solution.violations = _violations(compiled, result.values)
     return solution
+
+
+def _violations(compiled: CompiledProblem, values: dict[str, float]) -> list[Violation]:
+    labels = LabelResolver(compiled.ir)
+    out: list[Violation] = []
+    for c in compiled.flat.constraints:
+        for key in c.violation_keys:
+            amount = values.get(key, 0.0)
+            if amount <= TOLERANCE:
+                continue
+            out.append(
+                Violation(
+                    key=c.key,
+                    name=c.name,
+                    statement=c.statement,
+                    index=list(c.index),
+                    label=labels.constraint(c.name, c.index),
+                    amount=amount,
+                    direction="under" if key.startswith("~under[") else "over",
+                    penalty=c.penalty or 0.0,
+                    cost=amount * (c.penalty or 0.0),
+                )
+            )
+    # Dearest first: the reader wants the rule that cost the most, not the one
+    # that happens to come first in the model.
+    out.sort(key=lambda v: (-v.cost, v.key))
+    return out
 
 
 def _why_no_duals(compiled: CompiledProblem, result: SolveResult) -> str:
@@ -175,6 +227,8 @@ def _decisions(compiled: CompiledProblem, values: dict[str, float]) -> list[Deci
     labels = LabelResolver(compiled.ir)
     out: list[Decision] = []
     for var in compiled.flat.variables:
+        if var.role != "decision":
+            continue  # room to break a rule is not something anyone chose
         value = values.get(var.key, 0.0)
         if abs(value) <= TOLERANCE:
             continue  # a decision not taken is not a decision
@@ -207,7 +261,14 @@ def _constraints(
     binding: list[ConstraintOutcome] = []
     slack_rows: list[ConstraintOutcome] = []
     for c in compiled.flat.constraints:
-        activity = sum(coef * result.values.get(key, 0.0) for key, coef in c.terms.items())
+        # The activity worth reporting is the one the model stated. A soft row
+        # also carries the slack that made it feasible, and including that
+        # would show every broken rule sitting exactly on its limit.
+        activity = sum(
+            coef * result.values.get(key, 0.0)
+            for key, coef in c.terms.items()
+            if key not in c.violation_keys
+        )
         dual = result.duals.get(c.key)
         if c.op == "le":
             slack = c.rhs - activity

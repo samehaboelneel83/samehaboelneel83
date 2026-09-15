@@ -91,8 +91,16 @@ class ProblemConstraint(BaseModel):
     category: Literal[
         "physical", "policy", "regulatory", "operational", "modelling"
     ] = "operational"
+    penalty: float | None = None
+    """What one unit of violation costs. ``None`` means the constraint is hard
+    and cannot be violated at any price, which is the default: a rule is only
+    negotiable when someone says so and says what the price is."""
     rationale: str | None = None
     origin: SourceRef | None = None
+
+    @property
+    def soft(self) -> bool:
+        return self.penalty is not None
 
 
 class ProblemObjective(BaseModel):

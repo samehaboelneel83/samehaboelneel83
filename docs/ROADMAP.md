@@ -76,20 +76,21 @@ read.
 
 ---
 
-## Phase 1 — Soft constraints
+## Phase 1 — Soft constraints — **done**
 
-A constraint declares that it is soft and what violating it costs. The compiler
-adds the slack variable and the objective term; nothing downstream needs to
-know, because a violated soft constraint is already a row with a statement, a
-category and a rationale attached.
+`soft penalty <cost>` on a constraint. The compiler adds a slack column per
+direction the row can be missed in, bounds it by what the row can reach, makes
+it integral where the row can only be missed by whole numbers, and charges the
+objective per unit of violation. Violations are reported as violations, never
+as decisions and never absorbed into the activity.
 
-**Why first.** It is the largest gap in what the language can say, and it is
-also the mechanism Phase 2 needs — a minimal conflict set is found by relaxing
-an elastic model. Building diagnosis first means building this machinery twice.
+Delivered with `examples/duty_roster.psp`, whose two answers are checked
+against arithmetic done by hand, and whose short-handed scenario shows a price
+deciding *which* rule gives way.
 
-**Done when** a model with a deliberately unsatisfiable soft constraint solves
-rather than failing, the violation and its cost appear on the solution, and the
-penalty shows in the objective breakdown beside the other components.
+One limitation worth recording: a penalty is a literal, so a scenario cannot
+ask "what if keeping requests mattered more?". Making penalties
+parameter-valued is small and worth doing when something needs it.
 
 ---
 

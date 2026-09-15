@@ -189,6 +189,12 @@ class Lowering:
                 f"'{decl.category}' is not a constraint category", decl,
                 hint="use one of " + ", ".join(sorted(CATEGORIES)),
             )
+        if decl.penalty is not None and decl.penalty <= 0:
+            raise self.fail(
+                f"a penalty of {decl.penalty:g} makes '{decl.name}' free to break",
+                decl,
+                hint="give a positive cost, or drop 'soft' to make the rule hard",
+            )
         scope = {b.index: b.set_name for b in decl.forall}
         for binding in decl.forall:
             self._known_set(binding.set_name, binding)
@@ -196,6 +202,7 @@ class Lowering:
             name=decl.name,
             statement=decl.statement,
             category=decl.category,
+            penalty=decl.penalty,
             rationale=decl.rationale,
             forall=[IrBinding(index=b.index, set=b.set_name) for b in decl.forall],
             where=self._predicate(decl.where, scope) if decl.where else None,

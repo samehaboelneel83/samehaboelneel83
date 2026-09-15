@@ -129,6 +129,31 @@ Every built-in template can be read back as source (`GET /api/dsl/templates/{key
 which is the fastest way to learn the language — and there is a test asserting
 all six survive the round trip with an identical model fingerprint.
 
+### Soft constraints
+
+A rule is hard unless it says what breaking it costs:
+
+```
+constraint honour_days_off "Nobody works a day they asked off"
+  category policy
+  soft penalty 20
+  because "Requests are kept unless keeping them would leave a day uncovered"
+  sum(on_duty[p, d] for p in People, d in Days where asked_off[p, d] == 1) == 0
+```
+
+The compiler adds the room to break it and charges the objective for using it.
+Violations come back as violations — which rule, by how much, in which
+direction, at what price — rather than being absorbed into an answer that looks
+clean. The penalties appear in the objective breakdown as one component beside
+the stated objectives.
+
+Prices are what let a model be handed an impossible week and still return the
+plan a sensible person would write. In `examples/duty_roster.psp` a missing
+day is priced at 50, an overridden request at 20 and an uneven week at 6; when
+one person is away, the plan leaves *Monday* uncovered, because that is the one
+uncovered day that also saves a request. Both its answers are checked against
+arithmetic done by hand.
+
 ### Quadratic objectives
 
 An objective may multiply two decisions. Nothing else may:

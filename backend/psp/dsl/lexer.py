@@ -12,7 +12,7 @@ KEYWORDS = {
     "minimize", "maximize", "assume", "scenario", "structure",
     "forall", "where", "sum", "for", "in", "and", "or", "not",
     "binary", "integer", "continuous", "int", "label",
-    "default", "unit", "labels", "means", "because", "category",
+    "default", "unit", "labels", "means", "because", "category", "soft", "penalty",
     "weight", "scale", "by", "to", "inf", "of", "affects",
 }
 

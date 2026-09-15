@@ -176,6 +176,8 @@ def _constraint(c) -> list[str]:
     lines = [f"constraint {_name(c.name)} {_quote(c.statement)}"]
     if c.category != "operational":
         lines.append(f"  category {c.category}")
+    if c.penalty is not None:
+        lines.append(f"  soft penalty {_number(c.penalty)}")
     if c.rationale:
         lines.append(f"  because {_quote(c.rationale)}")
     header = ""

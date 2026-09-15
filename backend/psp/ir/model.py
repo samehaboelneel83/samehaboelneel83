@@ -97,6 +97,14 @@ class IRConstraint(BaseModel):
     rel: Rel
     statement: str | None = None
     origin: str | None = None
+    penalty: float | None = None
+    """Cost of one unit of violation, or ``None`` for a rule that holds
+    absolutely. A penalty makes the family soft: the compiler gives each of its
+    rows room to be broken and charges the objective for using it."""
+
+    @property
+    def soft(self) -> bool:
+        return self.penalty is not None
 
 
 class IRObjective(BaseModel):

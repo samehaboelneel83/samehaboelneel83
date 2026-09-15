@@ -82,6 +82,48 @@ export default function ResultsPage({
 
   return (
     <>
+      {solution.violations.length > 0 && (
+        <Card
+          title="Rules this plan breaks"
+          subtitle="Soft constraints the plan could not keep, what it cost to break each one, and by how much."
+          actions={
+            <Badge kind="warn">
+              {num(solution.violations.reduce((sum, v) => sum + v.cost, 0))} in penalties
+            </Badge>
+          }
+        >
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rule</th>
+                  <th className="num">Missed by</th>
+                  <th className="num">Price</th>
+                  <th className="num">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {solution.violations.map((v) => (
+                  <tr key={`${v.key}:${v.direction}`}>
+                    <td>
+                      <span className="mono">
+                        {v.label ?? (v.index.length > 0 ? `${v.name}[${v.index.join(",")}]` : v.name)}
+                      </span>
+                      {v.statement && <div className="muted">{v.statement}</div>}
+                    </td>
+                    <td className="num">
+                      {num(v.amount)} <span className="muted">{v.direction}</span>
+                    </td>
+                    <td className="num">{num(v.penalty)}</td>
+                    <td className="num">{num(v.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       <div className="grid two">
         <Card
           title="Recommended decisions"
