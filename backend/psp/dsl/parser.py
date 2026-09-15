@@ -18,6 +18,7 @@ from psp.dsl.nodes import (
     Binding,
     Compare,
     ConstraintDecl,
+    HierarchyDecl,
     Logical,
     Lookup,
     Negate,
@@ -207,6 +208,7 @@ class Parser:
             "assume": self.assume_declaration,
             "scenario": self.scenario_declaration,
             "structure": self.structure_declaration,
+            "hierarchy": self.hierarchy_declaration,
         }.get(token.value)
         if handler is None:
             raise self.error(
@@ -361,6 +363,60 @@ class Parser:
             return float("inf") * (-1 if negative else 1)
         token = self.expect("number", what="a number")
         return float(token.value) * (-1 if negative else 1)
+
+    # ----------------------------------------------------------- hierarchy
+
+    #: What may be derived from a tree, and the clause that names each. Matched
+    #: as ordinary words rather than reserved as keywords, so a model is still
+    #: free to call something 'covers'.
+    DERIVABLE = ("covers", "overlap", "leaf", "count", "depth")
+
+    def hierarchy_declaration(self) -> HierarchyDecl:
+        start = self.expect("keyword", "hierarchy")
+        node = HierarchyDecl(line=start.line, column=start.column)
+        node.name = self.identifier("the set the tree is over")
+
+        direction = self.identifier("'by parent'")
+        if direction != "by":
+            raise self.error(
+                f"expected 'by parent', found '{direction}'",
+                hint="a hierarchy says which way its map runs: 'by parent'",
+            )
+        node.direction = self.identifier("'parent'")
+        if node.direction != "parent":
+            raise self.error(
+                f"a hierarchy is given 'by parent', not by '{node.direction}'",
+                hint="write the map as child: parent",
+            )
+        self.skip_newlines()
+
+        while self.at_any("name", self.DERIVABLE):
+            clause = self.identifier("a derived table")
+            if clause in node.derived:
+                raise self.error(f"'{clause}' is named twice for this hierarchy")
+            node.derived[clause] = self.identifier(f"a name for the {clause} table")
+            self.skip_newlines()
+
+        if not node.derived:
+            raise self.error(
+                f"hierarchy '{node.name}' derives nothing",
+                hint="name at least one of " + ", ".join(self.DERIVABLE),
+            )
+
+        self.expect("symbol", "=", what="'=' and the child: parent map")
+        self.expect("symbol", "{", what="the map in braces")
+        self.skip_newlines()
+        while not self.at("symbol", "}"):
+            child = self.element()
+            self.expect("symbol", ":", what="':' and the parent")
+            node.parent.append((child, self.element()))
+            self.skip_newlines()
+            if not self.accept("symbol", ","):
+                break
+            self.skip_newlines()
+        self.expect("symbol", "}", what="the map to close with '}'")
+        self.end_of_declaration()
+        return node
 
     # ----------------------------------------------------------------- var
 

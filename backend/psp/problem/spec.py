@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from psp.ir.expr import Binding, Expr, Pred, Rel
+from psp.problem.hierarchy import Hierarchy
 from psp.ir.model import Sense, SetKind, VarKind
 
 
@@ -62,6 +63,9 @@ class ProblemParameter(BaseModel):
     default: float | None = None
     unit: str | None = None
     description: str | None = None
+    derived_from: str | None = None
+    """The hierarchy this table was computed from, when it was not written out.
+    Kept so the language can write the tree back rather than its consequences."""
 
 
 class ProblemVariable(BaseModel):
@@ -182,6 +186,7 @@ class ProblemSpec(BaseModel):
     constraints: list[ProblemConstraint] = Field(default_factory=list)
     objectives: list[ProblemObjective] = Field(default_factory=list)
     assumptions: list[Assumption] = Field(default_factory=list)
+    hierarchies: list[Hierarchy] = Field(default_factory=list)
     scenarios: list[Scenario] = Field(default_factory=list)
     uncertainty: list[Uncertainty] = Field(default_factory=list)
     structure: StructureHint | None = None

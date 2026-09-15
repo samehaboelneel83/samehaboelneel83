@@ -13,6 +13,7 @@ KEYWORDS = {
     "forall", "where", "sum", "for", "in", "and", "or", "not",
     "binary", "integer", "continuous", "int", "label",
     "default", "unit", "labels", "means", "because", "category", "soft", "penalty",
+    "hierarchy",
     "weight", "scale", "by", "to", "inf", "of", "affects",
 }
 

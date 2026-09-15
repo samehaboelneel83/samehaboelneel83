@@ -33,9 +33,16 @@ def write_problem(spec: ProblemSpec) -> str:
     if spec.sets:
         out.append("")
 
-    for p in spec.parameters:
+    for h in spec.hierarchies:
+        out.extend(_hierarchy(h))
+        out.append("")
+
+    # A derived table is written as the tree it came from, not as itself — the
+    # whole point of the construct is that nobody maintains the consequences.
+    written = [p for p in spec.parameters if p.derived_from is None]
+    for p in written:
         out.append(_param(p))
-    if spec.parameters:
+    if written:
         out.append("")
 
     for v in spec.variables:
@@ -78,11 +85,17 @@ def _quote(text: str) -> str:
 
 
 def _name(text: str) -> str:
-    """Names are bare when they can be, quoted when they would be misread."""
+    """Names are bare when they can be, quoted when they would be misread.
+
+    A name that happens to be a keyword is left bare. The parser takes a
+    keyword wherever it takes a name, and quoting one produced source it could
+    not read back: a model with a parameter called ``weight`` was written as
+    ``"weight"[c]``, which reads as a string followed by a stray bracket.
+    """
     if not text:
         return '""'
     usable = text.replace("_", "a").replace(".", "a")
-    if usable.isalnum() and not text[0].isdigit() and text not in KEYWORDS:
+    if usable.isalnum() and not text[0].isdigit():
         return text
     return _quote(text)
 
@@ -269,3 +282,14 @@ def _predicate(node, nested: bool = False) -> str:
     if pred == "not":
         return f"not {_predicate(node.arg, True)}"
     raise ValueError(f"cannot write predicate node '{pred}'")
+
+
+def _hierarchy(h) -> list[str]:
+    lines = [f"hierarchy {_name(h.name)} by parent"]
+    for clause, name in (("covers", h.covers), ("overlap", h.overlap),
+                         ("leaf", h.leaf), ("count", h.count), ("depth", h.depth)):
+        if name:
+            lines.append(f"  {clause} {_name(name)}")
+    pairs = [f"{_name(child)}: {_name(parent)}" for child, parent in h.parent.items()]
+    lines.append("  = { " + ", ".join(pairs) + " }")
+    return lines

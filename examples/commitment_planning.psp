@@ -61,53 +61,30 @@ set Periods : int = 0..19 labels {
     18: "W2 Fri AM",
     19: "W2 Fri PM" }
 
-# Ancestor-or-self over each tree: 1 when the first node covers the second.
-# This one relation is what lets a parent's capacity constrain everything
-# beneath it, and it is the only thing the three hierarchies have in common.
-param unit_covers[Units, Units] default 0 = {
-    (organisation, organisation): 1, (operations, operations): 1, (training, training): 1,
-    (ops_north, ops_north): 1, (ops_south, ops_south): 1, (instruction, instruction): 1,
-    (assessment, assessment): 1, (organisation, operations): 1, (organisation, training): 1,
-    (operations, ops_north): 1, (organisation, ops_north): 1, (operations, ops_south): 1,
-    (organisation, ops_south): 1, (training, instruction): 1, (organisation, instruction): 1,
-    (training, assessment): 1, (organisation, assessment): 1 }
-
-param specialty_covers[Specialties, Specialties] default 0 = {
-    (capability, capability): 1, (field, field): 1, (classroom, classroom): 1,
-    (mounted, mounted): 1, (dismounted, dismounted): 1, (teaching, teaching): 1,
-    (examining, examining): 1, (capability, field): 1, (capability, classroom): 1,
-    (field, mounted): 1, (capability, mounted): 1, (field, dismounted): 1,
-    (capability, dismounted): 1, (classroom, teaching): 1, (capability, teaching): 1,
-    (classroom, examining): 1, (capability, examining): 1 }
-
-param is_leaf[Units] default 0 "1 for a unit with nothing beneath it" = {
-    ops_north: 1, ops_south: 1, instruction: 1, assessment: 1 }
-
-# How many units is_leaf marks. The balance objective needs it to compare a unit
-# against the average, and the language has no count of its own, so it is stated
-# — and a test asserts it against is_leaf, the way the other derived tables here
-# are kept honest.
-param leaf_count "How many leaf units there are" = 4
-
-# How many leaf units two nodes of the tree have in common. This is what lets a
-# branch commitment cost the right amount: assigning one to operations engages
-# both its units, so it consumes two unit-periods, and it shows up in the load
-# of every node that shares a unit with it.
+# Two of the three trees are stated as trees. Everything a rule needs from them
+# — ancestor-or-self, the leaves two nodes share, which nodes are leaves and how
+# many there are — follows from the parent links and is derived rather than
+# transcribed. Only the edges are data anyone maintains.
 #
-# It is derivable from unit_covers and is_leaf, and the rules below could count
-# the shared leaves themselves. Stating it as a table instead keeps a term for
-# each pair of units rather than one for each pair and every leaf between them,
-# which is the difference between a model that flattens in seconds and one that
-# does not on a real organisation. Same model either way; only the cost of
-# building it differs.
-param unit_overlap[Units, Units] default 0 = {
-    (organisation, organisation): 4, (organisation, operations): 2, (organisation, training): 2, (organisation, ops_north): 1,
-    (organisation, ops_south): 1, (organisation, instruction): 1, (organisation, assessment): 1, (operations, organisation): 2,
-    (operations, operations): 2, (operations, ops_north): 1, (operations, ops_south): 1, (training, organisation): 2,
-    (training, training): 2, (training, instruction): 1, (training, assessment): 1, (ops_north, organisation): 1,
-    (ops_north, operations): 1, (ops_north, ops_north): 1, (ops_south, organisation): 1, (ops_south, operations): 1,
-    (ops_south, ops_south): 1, (instruction, organisation): 1, (instruction, training): 1, (instruction, instruction): 1,
-    (assessment, organisation): 1, (assessment, training): 1, (assessment, assessment): 1 }
+# The derived tables are still tables, for the reason DECISIONS.md gives: a rule
+# that counted shared leaves itself would carry a term for every pair of units
+# *and every leaf between them*, which is the difference between a model that
+# flattens in seconds and one that does not. What has gone is the copying.
+
+hierarchy Units by parent
+  covers unit_covers
+  overlap unit_overlap
+  leaf is_leaf
+  count leaf_count
+  = { operations: organisation, training: organisation,
+      ops_north: operations, ops_south: operations,
+      instruction: training, assessment: training }
+
+hierarchy Specialties by parent
+  covers specialty_covers
+  = { field: capability, classroom: capability,
+      mounted: field, dismounted: field,
+      teaching: classroom, examining: classroom }
 
 # A node of the time tree is a contiguous range of periods. That is the whole
 # of what a level is, so one rule governs a day, a week and the horizon alike.

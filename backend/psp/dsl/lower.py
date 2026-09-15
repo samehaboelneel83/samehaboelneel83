@@ -32,6 +32,7 @@ from psp.ir.expr import (
     VarRef,
 )
 from psp.ir.expr import Binding as IrBinding
+from psp.problem.hierarchy import Hierarchy, HierarchyError, derive
 from psp.problem.spec import (
     Assumption,
     ParameterValue,
@@ -59,6 +60,8 @@ class Lowering:
         self.params: dict[str, nodes.ParamDecl] = {}
         self.vars: dict[str, nodes.VarDecl] = {}
         self.elements: dict[str, str] = {}  # element -> the set that declares it
+        self.hierarchies: list[Hierarchy] = []
+        self.derived: dict[str, str] = {}  # derived table name -> hierarchy name
 
     # ------------------------------------------------------------- errors
 
@@ -95,6 +98,9 @@ class Lowering:
                 spec.scenarios.append(self._scenario(decl))
             elif isinstance(decl, nodes.StructureDecl):
                 spec.structure = StructureHint(kind=decl.kind, **decl.fields)
+        spec.hierarchies = list(self.hierarchies)
+        for parameter in spec.parameters:
+            parameter.derived_from = self.derived.get(parameter.name)
         if not spec.variables:
             raise ResolveError(
                 f"problem '{spec.key}' declares no decision variables",
@@ -102,8 +108,57 @@ class Lowering:
             )
         return spec
 
+    def _expand_hierarchies(self) -> None:
+        """Turn each tree into the parameter declarations it stands for.
+
+        Done before anything else reads the program, so every later pass — name
+        resolution, arity checking, scenario overrides — sees ordinary tables
+        and needs to know nothing about hierarchies.
+        """
+        elements: dict[str, list[str]] = {
+            d.name: list(d.elements)
+            for d in self.program.declarations
+            if isinstance(d, nodes.SetDecl)
+        }
+        expanded: list = []
+        for decl in self.program.declarations:
+            expanded.append(decl)
+            if not isinstance(decl, nodes.HierarchyDecl):
+                continue
+            if decl.name not in elements:
+                raise self.fail(
+                    f"hierarchy '{decl.name}' is not a declared set", decl,
+                    hint=did_you_mean(decl.name, list(elements)),
+                )
+            seen: dict[str, str] = {}
+            for child, parent in decl.parent:
+                if child in seen:
+                    raise self.fail(
+                        f"'{child}' is given a parent twice in hierarchy "
+                        f"'{decl.name}'", decl,
+                    )
+                seen[child] = parent
+            tree = Hierarchy(name=decl.name, parent=seen, **decl.derived)
+            try:
+                tables = derive(tree, elements[decl.name])
+            except HierarchyError as exc:
+                raise self.fail(str(exc), decl) from exc
+            self.hierarchies.append(tree)
+            for table in tables:
+                expanded.append(
+                    nodes.ParamDecl(
+                        line=decl.line, column=decl.column,
+                        name=table["name"], index_sets=table["index_sets"],
+                        default=table["default"], values=table["values"],
+                        description=_derived_description(table["name"], tree),
+                    )
+                )
+                self.derived[table["name"]] = tree.name
+        self.program.declarations = expanded
+
     def _collect(self) -> None:
         """Index every declaration first, so order in the file does not matter."""
+        self._expand_hierarchies()
         for decl in self.program.declarations:
             if isinstance(decl, nodes.SetDecl):
                 self._claim(self.sets, decl.name, decl, "set")
@@ -364,3 +419,16 @@ class Lowering:
 
 def lower(program: nodes.Program, source: str = "", origin: str = "dsl") -> ProblemSpec:
     return Lowering(program, source, origin).run()
+
+
+def _derived_description(name: str, tree: Hierarchy) -> str:
+    """What the table is, in words, so the Problem screen and any explanation
+    citing it still read as though someone had written them."""
+    what = {
+        tree.covers: f"1 when the first node of {tree.name} covers the second",
+        tree.overlap: f"Leaf nodes of {tree.name} that two nodes have in common",
+        tree.leaf: f"1 for a node of {tree.name} with nothing beneath it",
+        tree.count: f"How many leaf nodes {tree.name} has",
+        tree.depth: f"Steps from the root of {tree.name}",
+    }[name]
+    return f"{what}, derived from the hierarchy"

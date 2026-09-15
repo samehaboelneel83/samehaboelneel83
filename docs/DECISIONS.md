@@ -254,9 +254,19 @@ seconds of flattening; on a real organisation it is the difference between a
 model that builds and one that does not.
 
 So a hierarchy enters a problem as tables — `covers` for ancestor-or-self,
-`overlap` for shared leaves — and the rules read them. They are derived data and
-a tool should generate them, which is exactly what the templates do; the
-language accepts them as ordinary parameters and stays out of it.
+`overlap` for shared leaves — and the rules read them.
+
+What that reasoning never justified was making the author write them out. The
+language now takes the tree and derives the tables from it, so the edges are
+the only thing anyone maintains. The tables are still tables, for the reason
+above; what has gone is the copying, and with it the class of bug where a
+`leaf_count` of 4 outlives the fourth leaf.
+
+The derived tables take the author\'s names rather than canonical ones. A unit
+tree and a specialty tree in the same model each need a `covers`, and only the
+author knows which word their domain uses — which is also what let the
+construct be checked against the hand-written tables it replaced, rather than
+merely against itself.
 
 ---
 

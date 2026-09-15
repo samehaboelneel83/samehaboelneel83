@@ -132,6 +132,14 @@ class ParamDecl(Located):
 
 
 @dataclass
+class HierarchyDecl(Located):
+    name: str = ""
+    direction: str = "parent"
+    derived: dict[str, str] = field(default_factory=dict)
+    parent: list[tuple[str, str]] = field(default_factory=list)
+
+
+@dataclass
 class VarDecl(Located):
     name: str = ""
     index_sets: list[str] = field(default_factory=list)

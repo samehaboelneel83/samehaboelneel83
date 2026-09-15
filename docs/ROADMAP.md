@@ -118,7 +118,7 @@ Two things deliberately left for later, both recorded in `DECISIONS.md`:
 
 ---
 
-## Phase 3 — Hierarchy as a construct
+## Phase 3 — Hierarchy as a construct — **done**
 
 Declare the tree once:
 
@@ -137,10 +137,20 @@ having it has already been paid twice — once for `unit_overlap`, once for
 `leaf_count`, each time with a test written to catch the drift that a derived
 table invites.
 
-**Done when** `examples/commitment_planning.psp` deletes all five derived
-tables and compiles to an **identical IR fingerprint**. That is the only
-acceptance test worth having, because it proves the construct means exactly
-what the hand-written data meant.
+**Done.** `examples/commitment_planning.psp` declares two trees and deletes
+all five derived tables, 46 lines of them.
+
+The acceptance test moved, and it is worth saying why. An identical **IR
+fingerprint** was the wrong bar: the fingerprint is a hash of the whole IR
+including prose and the order values were written in, so it fails on a changed
+description and would have forced the derivation to reproduce a hand-written
+insertion order. The claim is that the construct *means* what the data meant,
+and the thing that carries meaning is the flat model. So the test pins the flat
+model — columns, rows, right-hand sides, objective — captured before the tables
+were deleted, across all five scenarios. It is byte-identical.
+
+Depth is derived too, though the commitment plan has no use for it: its time
+tree is a range of periods rather than a parent map, so it stays as data.
 
 ---
 

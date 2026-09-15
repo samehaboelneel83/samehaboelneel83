@@ -129,6 +129,33 @@ Every built-in template can be read back as source (`GET /api/dsl/templates/{key
 which is the fastest way to learn the language — and there is a test asserting
 all six survive the round trip with an identical model fingerprint.
 
+### Hierarchies
+
+A tree is declared once, and what the rules need from it is derived:
+
+```
+hierarchy Units by parent
+  covers unit_covers
+  overlap unit_overlap
+  leaf is_leaf
+  count leaf_count
+  = { operations: organisation, training: organisation,
+      ops_north: operations, ops_south: operations,
+      instruction: training, assessment: training }
+```
+
+`unit_covers` is ancestor-or-self, `unit_overlap` the leaves two nodes share,
+`is_leaf` and `leaf_count` what they sound like. They are still tables when
+they reach the compiler — a rule that counted shared leaves itself would carry
+a term for every pair of nodes *and every leaf between them* — but nobody
+writes or maintains them. A parent map that is not a tree is refused, by name:
+an unknown node, a node as its own parent, a cycle.
+
+`examples/commitment_planning.psp` declares two trees this way and deletes five
+tables. Its flat model — columns, rows, right-hand sides, objective — is
+byte-identical across all five scenarios to what the hand-written tables
+produced, which is the test.
+
 ### Soft constraints
 
 A rule is hard unless it says what breaking it costs:
