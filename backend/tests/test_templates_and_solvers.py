@@ -236,16 +236,17 @@ def test_sentinel_capacities_do_not_become_constraint_rows():
 def test_a_solve_returns_the_same_plan_in_a_different_process():
     """Solves get several workers by default, and that has to be safe.
 
-    CP-SAT's search depends on how many workers it has, so the worker count is
-    a fixed number rather than the machine's core count — a default read from
-    the hardware would make the plan depend on which computer ran it. Several
-    workers are also interleaved rather than left to race, because otherwise
-    whichever finds an optimum first decides which of several equally good
-    plans comes back.
+    Solved with four workers deliberately, which is not the default: one worker
+    cannot race, so the default could not catch the thing this guards. Several
+    workers left to themselves do race — whichever reaches an optimum first
+    decides which of several equally good plans comes back — and interleaving
+    them is what makes the plan, and not merely its objective value, a property
+    of the problem.
 
-    This is a sample, not a proof: it caught the racing version only when the
-    machine was slowed down, having passed for weeks before that. The guarantee
-    lives in the solver parameters; this is what would notice if it were lost.
+    This is a sample, not a proof: it caught the racing version only once the
+    machine was slowed down, having passed for some time before that. The
+    guarantee lives in the solver parameters; this is what would notice if it
+    were lost.
     """
     import os
     import pathlib as _pathlib
@@ -260,7 +261,8 @@ def test_a_solve_returns_the_same_plan_in_a_different_process():
         "from psp.solvers.base import SolveOptions;"
         "spec = parse_problem(open('../examples/commitment_planning.psp').read());"
         "flat = compile_and_flatten(spec).flat;"
-        "r, meta = run_solver(flat, options=SolveOptions(time_limit_seconds=120));"
+        "r, meta = run_solver(flat, "
+        "options=SolveOptions(time_limit_seconds=120, threads=4));"
         "print(meta['solver'], r.status.value, r.objective_value, "
         "json.dumps(sorted(k for k, v in r.values.items() if v > 0.5)))"
     )

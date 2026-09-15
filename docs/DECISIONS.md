@@ -275,29 +275,34 @@ signature; version identity uses the fingerprint.
 
 ---
 
-### A fixed number of workers, not the machine's
+### One worker, interleaved — and the story of getting there is the point
 
-A solve gets four workers unless it asks otherwise, and four is written down
-rather than read from the core count.
+A solve gets one worker unless it asks otherwise, and the engine interleaves
+its sub-solvers. The count is fixed rather than read from the core count,
+because CP-SAT's search depends on how many workers it has and a default taken
+from the hardware would make the plan depend on which computer ran it.
 
-The count is not a performance knob. CP-SAT's search depends on how many
-workers it has, so a default taken from the hardware would make the plan depend
-on which computer ran it — two people would get different rosters from the same
-model and neither would be wrong.
+This entry has been wrong twice, and both errors are worth keeping.
 
-A fixed count is not enough on its own, and the first version of this entry
-claimed it was. Several workers left to themselves *race*: whichever finds an
-optimum first decides which of several equally good plans comes back, so the
-same model on the same machine can answer differently depending on how busy it
-was. The objective value was always reproducible; the plan was not. A test that
-ran the same model in two interpreters passed for weeks and only failed when
-the machine was slowed down, which is exactly the way this kind of claim rots.
+**First**, one worker was called a crippling placeholder, on the evidence that
+the hardest model here came back "feasible" after four minutes at one worker
+and "proved optimal" in twenty-seven seconds at four. The evidence was real.
+The diagnosis was not: the model was slow at *every* worker count because
+CP-SAT was not interleaving its portfolio, so its sub-solvers were not given
+turns fairly. With interleaving on, one worker proves the same model in 5.6
+seconds — against 180 without. Four workers were a workaround for a missing
+parameter, and raising the count was changing the wrong knob.
 
-So the workers are interleaved — advanced in deterministic batches rather than
-allowed to race. That costs speed on easy models: the commitment plan proves
-optimal in 0.8 seconds on one worker and 2.1 on four interleaved. It is worth
-it, because a platform whose whole argument is that an answer can be defended
-cannot return a different defensible answer each time it is asked.
+**Second**, the fixed count was said to keep the answer "a property of the
+problem". It does not, on its own. Several workers left to themselves race, and
+whichever reaches an optimum first decides which of several equally good plans
+comes back — so the objective was reproducible but the plan was not. That is
+also what interleaving fixes, for any caller who asks for more than one worker.
+
+What the measurements now say: across every model in this repository, one
+worker totals 17.9 seconds against 21.1 for four. Four is faster on exactly one
+scenario and slower on most. So the default is one, and a caller with a
+genuinely hard instance can raise it and still get a reproducible plan.
 
 ---
 

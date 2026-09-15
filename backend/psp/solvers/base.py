@@ -47,12 +47,19 @@ class Capabilities(BaseModel):
     coefficient to scale to a whole number within :data:`RATIONAL_SCALE_LIMIT`."""
 
 
-#: Workers a solve gets unless it asks for otherwise. Fixed, not taken from the
-#: machine: CP-SAT's search depends on how many workers it has, so a default
-#: that read the core count would make the plan depend on which computer ran it.
-#: Four is enough to change the answer from "feasible" to "proved optimal" on
-#: the models here and small enough to leave a server room to serve.
-DEFAULT_THREADS = 4
+#: Workers a solve gets unless it asks for otherwise. One, and fixed rather than
+#: read from the machine: CP-SAT's search depends on how many workers it has, so
+#: a default taken from the core count would make the plan depend on which
+#: computer ran it.
+#:
+#: One was briefly raised to four, on the evidence that four could prove a hard
+#: model optimal where one could not. That evidence was real and the diagnosis
+#: was wrong — the model was unprovable at any worker count because the engine
+#: was not interleaving its sub-solvers. With that fixed, one worker proves the
+#: same model in 5.6 seconds, and is the faster default across every model in
+#: this repository. A caller with a genuinely hard instance can still ask for
+#: more.
+DEFAULT_THREADS = 1
 
 #: Largest common multiplier an exact-arithmetic engine may need to turn every
 #: coefficient in a model into a whole number.

@@ -82,12 +82,19 @@ class CpSatAdapter(SolverAdapter):
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(options.time_limit_seconds)
         solver.parameters.num_workers = max(1, int(options.threads))
-        # Several workers search in parallel, and left to themselves they race:
-        # whichever finds an optimum first decides which of several equally good
-        # plans comes back, so the same model can answer differently depending on
-        # how busy the machine was. Interleaving makes them advance in
-        # deterministic batches instead, which is what makes the plan — and not
-        # merely its objective value — a property of the problem.
+        # Interleaving buys two quite different things, and it is set always
+        # because both matter.
+        #
+        # Speed, which was the surprise: CP-SAT runs a portfolio of sub-solvers,
+        # and without interleaving they are not given turns fairly. On the
+        # hardest model here that was the difference between proving optimality
+        # in 5.6 seconds and not proving it in 180.
+        #
+        # And reproducibility, whenever a caller asks for more than one worker:
+        # workers left to themselves race, and whichever reaches an optimum
+        # first decides which of several equally good plans comes back. Batches
+        # make the plan — not merely its objective value — a property of the
+        # problem rather than of how busy the machine was.
         solver.parameters.interleave_search = True
         solver.parameters.random_seed = int(options.seed)
         solver.parameters.log_search_progress = bool(options.log)
