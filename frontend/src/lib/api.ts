@@ -167,6 +167,27 @@ export const api = {
     }),
   createEntity: (body: Record<string, unknown>) =>
     request<{ id: string }>("/domain/entities", { method: "POST", body: JSON.stringify(body) }),
+  relationshipTypes: () =>
+    request<{
+      relationship_types: Array<{
+        key: string;
+        name: string;
+        directed: boolean;
+        relationships: number;
+      }>;
+    }>("/domain/relationship-types"),
+  relationships: (relationshipType?: string) =>
+    request<{
+      relationships: Array<{
+        relationship_type: string;
+        source: string;
+        target: string;
+      }>;
+    }>(
+      `/domain/relationships${
+        relationshipType ? `?relationship_type=${encodeURIComponent(relationshipType)}` : ""
+      }`,
+    ),
 
   simulateSweep: (body: Record<string, unknown>) =>
     request<{

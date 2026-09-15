@@ -231,7 +231,7 @@ should wait until a model here needs it.
 
 ---
 
-## Phase 6 — Binding the domain to the problem
+## Phase 6 — Binding the domain to the problem — **done**
 
 Make the eleven dead tables real: entities, relationships and hierarchies in
 the domain generate the index sets, parent relations and tables a problem is
@@ -241,6 +241,29 @@ stated over, instead of being retyped into the language.
 first time, and it is worth little before Phase 3 and Phase 4 — binding a
 domain model to an algebra nobody can read moves the problem rather than
 solving it. Afterwards there is something worth binding *to*.
+
+**Done.** Three `from` clauses — a set from an entity type, a hierarchy from a
+relationship type, a parameter from an entity attribute — plus the storage and
+endpoints for relationships, which had tables and no code. Binding is a pure
+function over a snapshot, so a problem can be bound against a domain written in
+four lines of a test; the database appears in one small module that produces
+that snapshot.
+
+The acceptance test is the same shape as Phase 3\'s: a bound problem compiles
+to the same **system signature** as the same problem typed out.
+
+**What is still dead, and honestly so.** `hierarchy` and `hierarchy_node`
+remain unused: a parent relationship already carries a tree, and a second
+representation of the same thing would need a rule for which one wins.
+`role_type`, `entity_role`, `state_type`, `entity_state`, `event_type` and
+`event` are also untouched — roles and states are a real modelling idea and not
+one any problem here needs yet, and the survey discipline from Phase 4 applies:
+build them when a model asks.
+
+**Next, if this continues.** Parameters indexed by two sets could bind to a
+relationship\'s attributes the way one-dimensional ones bind to an entity\'s —
+that is the obvious gap, and `unit_cost[Depots, Customers]` is the shape of
+problem that wants it.
 
 ---
 

@@ -16,7 +16,9 @@ from psp.compiler.errors import CompileError
 from psp.compiler.pipeline import compile_and_flatten
 from psp.db import models as m
 from psp.dsl import DslError, parse_problem, write_problem
+from psp.db.snapshot import read_domain
 from psp.execution.service import load_spec, persist_problem
+from psp.problem.binding import BindingError, bind, needs_binding
 from psp.problem.templates.registry import get as get_template
 
 router = APIRouter(prefix="/dsl", tags=["authoring"])
@@ -25,6 +27,24 @@ router = APIRouter(prefix="/dsl", tags=["authoring"])
 class SourceRequest(BaseModel):
     source: str
     save: bool = False
+
+
+def _bind(spec, session: Session):
+    """Fill in whatever the problem asked the domain for.
+
+    Bound once, here, and what is stored is the result. A problem that resolved
+    its sets at solve time would answer a different question every time the
+    organisation hired someone, with nothing in the run record to say so.
+    """
+    if not needs_binding(spec):
+        return spec
+    try:
+        return bind(spec, read_domain(session))
+    except BindingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"kind": "binding", "message": str(exc), "known": exc.known},
+        ) from exc
 
 
 def _parse(source: str):
@@ -40,9 +60,9 @@ def _parse(source: str):
 
 
 @router.post("/check")
-def check(request: SourceRequest) -> dict:
+def check(request: SourceRequest, session: Session = SessionDep) -> dict:
     """Parse and compile without solving, so an author can see what they built."""
-    spec = _parse(request.source)
+    spec = _bind(_parse(request.source), session)
     try:
         compiled = compile_and_flatten(spec)
     except CompileError as exc:
@@ -73,7 +93,7 @@ def check(request: SourceRequest) -> dict:
 @router.post("/problems", status_code=status.HTTP_201_CREATED)
 def create(request: SourceRequest, session: Session = SessionDep) -> dict:
     """Save a problem written as text."""
-    spec = _parse(request.source)
+    spec = _bind(_parse(request.source), session)
     try:
         compile_and_flatten(spec)
     except CompileError as exc:

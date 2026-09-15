@@ -28,6 +28,9 @@ class Hierarchy(BaseModel):
     """The set the tree is over."""
     parent: dict[str, str] = Field(default_factory=dict)
     """Child element -> parent element. A root is simply absent."""
+    from_relationship: str | None = None
+    """A domain relationship the parent links are read from, source to target,
+    rather than written out."""
     covers: str | None = None
     """Name for the ancestor-or-self table: 1 when the first covers the second."""
     overlap: str | None = None
@@ -97,6 +100,27 @@ def leaves_under(hierarchy: Hierarchy, element: str, elements: list[str]) -> lis
         e for e in elements
         if e not in has_children and element in ancestors_or_self(hierarchy, e)
     ]
+
+
+def shapes(hierarchy: Hierarchy) -> list[dict]:
+    """The tables a tree declares, without their values.
+
+    A tree bound to the domain has no edges until it is bound, but the tables
+    it will produce already have names and index sets — and a rule written
+    against one has to resolve before anyone has connected a database.
+    """
+    out = []
+    for name, sets, default in (
+        (hierarchy.covers, [hierarchy.name, hierarchy.name], 0.0),
+        (hierarchy.overlap, [hierarchy.name, hierarchy.name], 0.0),
+        (hierarchy.leaf, [hierarchy.name], 0.0),
+        (hierarchy.count, [], None),
+        (hierarchy.depth, [hierarchy.name], 0.0),
+    ):
+        if name:
+            out.append({"name": name, "index_sets": sets, "default": default,
+                        "values": []})
+    return out
 
 
 def derive(hierarchy: Hierarchy, elements: list[str]) -> list[dict]:

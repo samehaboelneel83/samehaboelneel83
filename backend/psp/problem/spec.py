@@ -44,6 +44,9 @@ class ProblemSet(BaseModel):
     kind: SetKind = "label"
     elements: list[str] = Field(default_factory=list)
     entity_type: str | None = None
+    from_entity_type: str | None = None
+    """An entity type whose entities are this set, rather than a list written
+    out. Filled in when the problem is bound, and what is stored is the result."""
     description: str | None = None
     labels: dict[str, str] = Field(default_factory=dict)
     """How each element should read to a person, keyed by element.
@@ -66,6 +69,8 @@ class ProblemParameter(BaseModel):
     derived_from: str | None = None
     """The hierarchy this table was computed from, when it was not written out.
     Kept so the language can write the tree back rather than its consequences."""
+    from_attribute: str | None = None
+    """An entity attribute these values are read from, rather than written out."""
 
 
 class ProblemVariable(BaseModel):

@@ -206,6 +206,35 @@ whole platform is built to avoid, and it is not worth one fewer object.
 
 ---
 
+### A problem is bound to the domain once, and stores the result
+
+`set Units from unit` is resolved when the problem is saved. The stored problem
+holds the elements, not the request for them.
+
+The alternative — resolving at solve time — sounds better and is worse. The
+same stored problem would mean something different each month, two runs a week
+apart would not be comparable, and nothing in either run record would say why.
+Every part of this platform that exists to make an answer defensible depends on
+the question having been fixed before the answer was computed.
+
+The cost is real and worth stating: a problem does not follow the domain. When
+the organisation changes, the problem is re-saved, and that is a deliberate act
+with a new stored version behind it.
+
+---
+
+### An edge that leaves the set is an error, not a skipped row
+
+Binding a hierarchy from a relationship refuses any edge whose ends are not
+both in the set, rather than ignoring it.
+
+Ignoring it is the tempting behaviour, because a domain usually holds more than
+one problem needs. But the result is a tree missing exactly the links that were
+wrong — and a tree that is quietly missing a link still compiles, still solves,
+and gives an answer that is wrong in a way nobody will look for.
+
+---
+
 ### A big-M is derived from the model or it is refused
 
 Conditional rules need a constant, and this platform will not invent one. The

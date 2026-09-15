@@ -32,7 +32,7 @@ from psp.ir.expr import (
     VarRef,
 )
 from psp.ir.expr import Binding as IrBinding
-from psp.problem.hierarchy import Hierarchy, HierarchyError, derive
+from psp.problem.hierarchy import Hierarchy, HierarchyError, derive, shapes
 from psp.problem.spec import (
     Assumption,
     ParameterValue,
@@ -138,11 +138,21 @@ class Lowering:
                         f"'{decl.name}'", decl,
                     )
                 seen[child] = parent
-            tree = Hierarchy(name=decl.name, parent=seen, **decl.derived)
-            try:
-                tables = derive(tree, elements[decl.name])
-            except HierarchyError as exc:
-                raise self.fail(str(exc), decl) from exc
+            tree = Hierarchy(
+                name=decl.name, parent=seen,
+                from_relationship=decl.from_relationship or None, **decl.derived,
+            )
+            if tree.from_relationship:
+                # The edges arrive with the domain, but the tables they will
+                # produce are already named — and a rule written against one has
+                # to resolve now, before any database is involved. So the shapes
+                # are declared here and binding fills them.
+                tables = shapes(tree)
+            else:
+                try:
+                    tables = derive(tree, elements[decl.name])
+                except HierarchyError as exc:
+                    raise self.fail(str(exc), decl) from exc
             self.hierarchies.append(tree)
             for table in tables:
                 expanded.append(
@@ -209,10 +219,18 @@ class Lowering:
                                 hint=did_you_mean(key, decl.elements))
         return ProblemSet(
             name=decl.name, kind=decl.kind, elements=decl.elements,
-            labels=decl.labels, entity_type=decl.entity_type, description=decl.description,
+            labels=decl.labels, entity_type=decl.entity_type,
+            from_entity_type=decl.from_entity_type or None,
+            description=decl.description,
         )
 
     def _param(self, decl: nodes.ParamDecl) -> ProblemParameter:
+        if decl.from_attribute:
+            return ProblemParameter(
+                name=decl.name, index_sets=decl.index_sets, values=[],
+                default=decl.default, unit=decl.unit, description=decl.description,
+                from_attribute=decl.from_attribute,
+            )
         values = []
         for index, value in decl.values:
             for position, element in enumerate(index):

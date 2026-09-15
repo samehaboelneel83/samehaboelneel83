@@ -229,6 +229,14 @@ class Parser:
             if kind not in ("int", "label"):
                 raise self.error(f"a set is 'int' or 'label', not '{kind}'")
             node.kind = kind
+        if self.at_any("name", ("from",)):
+            self.advance()
+            node.from_entity_type = self.identifier("an entity type in the domain")
+            node.entity_type = node.from_entity_type
+            self.end_of_declaration()
+            node.description = node.description or self.trailing_description()
+            return node
+
         self.expect("symbol", "=", what="'=' and the set's elements")
 
         if self.at("number") and self.tokens[self.pos + 1].value == "..":
@@ -300,6 +308,14 @@ class Parser:
                 node.unit = self.string_value("the unit, in quotes")
             elif self.at("string"):
                 node.description = self.string_value("a description")
+            elif self.at_any("name", ("from",)):
+                self.advance()
+                if not self.at_any("name", ("attribute",)):
+                    raise self.error(
+                        "a parameter reads its values 'from attribute <name>'",
+                    )
+                self.advance()
+                node.from_attribute = self.identifier("the attribute to read")
             else:
                 break
 
@@ -402,6 +418,12 @@ class Parser:
                 f"hierarchy '{node.name}' derives nothing",
                 hint="name at least one of " + ", ".join(self.DERIVABLE),
             )
+
+        if self.at_any("name", ("from",)):
+            self.advance()
+            node.from_relationship = self.identifier("a relationship type in the domain")
+            self.end_of_declaration()
+            return node
 
         self.expect("symbol", "=", what="'=' and the child: parent map")
         self.expect("symbol", "{", what="the map in braces")

@@ -113,6 +113,7 @@ class Negate(Located):
 
 @dataclass
 class SetDecl(Located):
+    from_entity_type: str = ""
     name: str = ""
     kind: str = "label"
     elements: list[str] = field(default_factory=list)
@@ -128,12 +129,14 @@ class ParamDecl(Located):
     default: float | None = None
     unit: str | None = None
     description: str | None = None
+    from_attribute: str = ""
     values: list[tuple[list[str], float]] = field(default_factory=list)
 
 
 @dataclass
 class HierarchyDecl(Located):
     name: str = ""
+    from_relationship: str = ""
     direction: str = "parent"
     derived: dict[str, str] = field(default_factory=dict)
     parent: list[tuple[str, str]] = field(default_factory=list)

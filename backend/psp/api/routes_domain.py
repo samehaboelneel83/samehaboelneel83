@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from psp.api.deps import SessionDep
@@ -22,6 +22,19 @@ class EntityTypeIn(BaseModel):
     key: str
     name: str
     description: str | None = None
+
+
+class RelationshipTypeIn(BaseModel):
+    key: str
+    name: str
+    directed: bool = True
+
+
+class RelationshipIn(BaseModel):
+    relationship_type: str
+    source: str
+    target: str
+    attributes: dict = Field(default_factory=dict)
 
 
 class EntityIn(BaseModel):
@@ -135,3 +148,93 @@ def entity_set(entity_type: str, session: Session = SessionDep) -> dict:
         "elements": [e.key for e in entities],
         "attributes": {e.key: e.attributes for e in entities},
     }
+
+
+@router.get("/relationship-types")
+def list_relationship_types(session: Session = SessionDep) -> dict:
+    rows = session.scalars(select(m.RelationshipType).order_by(m.RelationshipType.key)).all()
+    counts = {
+        key: session.scalar(
+            select(func.count(m.Relationship.id)).where(
+                m.Relationship.relationship_type_id == rid
+            )
+        )
+        for rid, key in ((r.id, r.key) for r in rows)
+    }
+    return {
+        "relationship_types": [
+            {"key": r.key, "name": r.name, "directed": r.directed,
+             "relationships": counts.get(r.key, 0)}
+            for r in rows
+        ]
+    }
+
+
+@router.post("/relationship-types", status_code=status.HTTP_201_CREATED)
+def create_relationship_type(payload: RelationshipTypeIn, session: Session = SessionDep) -> dict:
+    existing = session.scalar(
+        select(m.RelationshipType).where(m.RelationshipType.key == payload.key)
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"relationship type '{payload.key}' already exists",
+        )
+    row = m.RelationshipType(key=payload.key, name=payload.name, directed=payload.directed)
+    session.add(row)
+    session.commit()
+    return {"id": row.id, "key": row.key}
+
+
+@router.get("/relationships")
+def list_relationships(
+    relationship_type: str | None = None, session: Session = SessionDep
+) -> dict:
+    types = {t.id: t.key for t in session.scalars(select(m.RelationshipType)).all()}
+    keys = {e.id: e.key for e in session.scalars(select(m.Entity)).all()}
+    query = select(m.Relationship)
+    if relationship_type is not None:
+        wanted = [i for i, key in types.items() if key == relationship_type]
+        query = query.where(m.Relationship.relationship_type_id.in_(wanted))
+    return {
+        "relationships": [
+            {
+                "relationship_type": types.get(link.relationship_type_id),
+                "source": keys.get(link.source_entity_id),
+                "target": keys.get(link.target_entity_id),
+                "attributes": link.attributes,
+            }
+            for link in session.scalars(query).all()
+        ]
+    }
+
+
+@router.post("/relationships", status_code=status.HTTP_201_CREATED)
+def create_relationship(payload: RelationshipIn, session: Session = SessionDep) -> dict:
+    kind = session.scalar(
+        select(m.RelationshipType).where(m.RelationshipType.key == payload.relationship_type)
+    )
+    if kind is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no relationship type '{payload.relationship_type}'",
+        )
+    ends = {}
+    for role, key in (("source", payload.source), ("target", payload.target)):
+        entity = session.scalar(select(m.Entity).where(m.Entity.key == key))
+        if entity is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no entity '{key}' to be the {role} of this relationship",
+            )
+        ends[role] = entity
+    row = m.Relationship(
+        relationship_type_id=kind.id,
+        source_entity_id=ends["source"].id,
+        target_entity_id=ends["target"].id,
+        attributes=payload.attributes,
+    )
+    session.add(row)
+    session.commit()
+    return {"id": row.id, "relationship_type": kind.key,
+            "source": payload.source, "target": payload.target}

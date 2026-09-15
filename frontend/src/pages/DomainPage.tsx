@@ -15,6 +15,9 @@ export default function DomainPage() {
     Array<{ key: string; name: string; entity_type: string; attributes: Record<string, unknown> }>
   >([]);
   const [error, setError] = useState<string | null>(null);
+  const [relationshipTypes, setRelationshipTypes] = useState<
+    Array<{ key: string; name: string; directed: boolean; relationships: number }>
+  >([]);
   const [draftType, setDraftType] = useState({ key: "", name: "" });
   const [draftEntity, setDraftEntity] = useState({ key: "", name: "", attributes: "{}" });
 
@@ -26,6 +29,10 @@ export default function DomainPage() {
 
   useEffect(() => {
     void loadTypes();
+    api
+      .relationshipTypes()
+      .then((body) => setRelationshipTypes(body.relationship_types))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -79,6 +86,36 @@ export default function DomainPage() {
   return (
     <>
       {error && <Notice kind="bad">{error}</Notice>}
+
+      {relationshipTypes.length > 0 && (
+        <Card
+          title="Relationships"
+          subtitle="How entities are joined. A problem can take a hierarchy straight from one of these instead of restating the tree."
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Name</th>
+                <th className="num">Links</th>
+                <th>Reads as</th>
+              </tr>
+            </thead>
+            <tbody>
+              {relationshipTypes.map((r) => (
+                <tr key={r.key}>
+                  <td className="mono">{r.key}</td>
+                  <td>{r.name}</td>
+                  <td className="num">{r.relationships}</td>
+                  <td className="muted">
+                    <code>hierarchy &lt;Set&gt; by parent … from {r.key}</code>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
 
       <div className="grid two">
         <Card

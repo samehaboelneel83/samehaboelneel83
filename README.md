@@ -129,6 +129,35 @@ Every built-in template can be read back as source (`GET /api/dsl/templates/{key
 which is the fastest way to learn the language — and there is a test asserting
 all six survive the round trip with an identical model fingerprint.
 
+### Taking the facts from the domain
+
+A problem can name the domain instead of restating it:
+
+```
+set Units from unit
+
+hierarchy Units by parent
+  covers unit_covers
+  leaf is_leaf
+  from reports_to
+
+param capacity[Units] from attribute capacity
+```
+
+The elements come from the entities of that type, the parent links from a
+relationship, the numbers from an attribute — each value carrying the entity it
+came from, so the provenance chain runs back past the problem into the domain.
+
+Binding happens **once, when the problem is saved**, and what is stored is the
+result. A problem that resolved its sets at solve time would answer a different
+question every time the organisation hired someone, with nothing in the run
+record to say so.
+
+A bound problem compiles to the same system as the same problem typed out, and
+a test asserts exactly that. Asking the domain for something it does not have
+is refused the way a language error is: by name, with what the domain does
+have.
+
 ### Rules that apply only under a condition
 
 ```

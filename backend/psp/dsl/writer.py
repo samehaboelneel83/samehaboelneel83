@@ -120,6 +120,8 @@ def _number(value: float) -> str:
 
 
 def _set(s) -> str:
+    if s.from_entity_type and not s.elements:
+        return f"set {_name(s.name)} from {_name(s.from_entity_type)}"
     kind = " : int" if s.kind == "int" else ""
     if s.kind == "int" and _is_contiguous(s.elements):
         body = f"{s.elements[0]}..{s.elements[-1]}"
@@ -154,6 +156,8 @@ def _param(p) -> str:
         head += f" unit {_quote(p.unit)}"
     if p.description:
         head += f" {_quote(p.description)}"
+    if p.from_attribute and not p.values:
+        return f"{head} from attribute {_name(p.from_attribute)}"
     if not p.values:
         return head
     if not p.index_sets:
@@ -289,7 +293,16 @@ def _predicate(node, nested: bool = False) -> str:
 
 
 def _hierarchy(h) -> list[str]:
-    lines = [f"hierarchy {_name(h.name)} by parent"]
+    head = f"hierarchy {_name(h.name)} by parent"
+    if h.from_relationship and not h.parent:
+        lines = [head]
+        for clause, name in (("covers", h.covers), ("overlap", h.overlap),
+                             ("leaf", h.leaf), ("count", h.count), ("depth", h.depth)):
+            if name:
+                lines.append(f"  {clause} {_name(name)}")
+        lines.append(f"  from {_name(h.from_relationship)}")
+        return lines
+    lines = [head]
     for clause, name in (("covers", h.covers), ("overlap", h.overlap),
                          ("leaf", h.leaf), ("count", h.count), ("depth", h.depth)):
         if name:
