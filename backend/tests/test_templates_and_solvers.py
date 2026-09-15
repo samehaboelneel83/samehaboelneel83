@@ -238,9 +238,14 @@ def test_a_solve_returns_the_same_plan_in_a_different_process():
 
     CP-SAT's search depends on how many workers it has, so the worker count is
     a fixed number rather than the machine's core count — a default read from
-    the hardware would make the plan depend on which computer ran it. With the
-    seed fixed, the same model must give the same plan every time, which only a
-    second interpreter can show.
+    the hardware would make the plan depend on which computer ran it. Several
+    workers are also interleaved rather than left to race, because otherwise
+    whichever finds an optimum first decides which of several equally good
+    plans comes back.
+
+    This is a sample, not a proof: it caught the racing version only when the
+    machine was slowed down, having passed for weeks before that. The guarantee
+    lives in the solver parameters; this is what would notice if it were lost.
     """
     import os
     import pathlib as _pathlib

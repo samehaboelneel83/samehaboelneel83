@@ -283,15 +283,21 @@ rather than read from the core count.
 The count is not a performance knob. CP-SAT's search depends on how many
 workers it has, so a default taken from the hardware would make the plan depend
 on which computer ran it — two people would get different rosters from the same
-model and neither would be wrong. A fixed number keeps the answer a property of
-the problem.
+model and neither would be wrong.
 
-One worker was the previous default, and it was a placeholder rather than a
-choice: on the commitment plan it was the difference between "feasible" after
-four minutes and "proved optimal" in twenty-seven seconds. A test solves the
-same model in two interpreters and compares the plans, because a reproducibility
-claim that nobody checks is a reproducibility claim that quietly stops being
-true.
+A fixed count is not enough on its own, and the first version of this entry
+claimed it was. Several workers left to themselves *race*: whichever finds an
+optimum first decides which of several equally good plans comes back, so the
+same model on the same machine can answer differently depending on how busy it
+was. The objective value was always reproducible; the plan was not. A test that
+ran the same model in two interpreters passed for weeks and only failed when
+the machine was slowed down, which is exactly the way this kind of claim rots.
+
+So the workers are interleaved — advanced in deterministic batches rather than
+allowed to race. That costs speed on easy models: the commitment plan proves
+optimal in 0.8 seconds on one worker and 2.1 on four interleaved. It is worth
+it, because a platform whose whole argument is that an answer can be defended
+cannot return a different defensible answer each time it is asked.
 
 ---
 
