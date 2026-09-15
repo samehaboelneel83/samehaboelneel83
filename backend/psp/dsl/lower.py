@@ -224,8 +224,25 @@ class Lowering:
             if override.index is None:
                 # No subscript means every value the parameter declares — the
                 # usual case, since "demand up 30%" means all of it.
-                targets = [index for index, _ in param.values] or [[]]
+                if not param.values:
+                    # A parameter that is only a default has nothing to scale,
+                    # and silently scaling nothing is how a scenario ends up
+                    # reporting no change and nobody noticing.
+                    raise self.fail(
+                        f"'{override.parameter}' declares no values, so there is nothing "
+                        "for this scenario to change",
+                        override,
+                        hint="give the parameter explicit values, or name the index to "
+                             f"change: {override.parameter}[...]",
+                    )
+                targets = [index for index, _ in param.values]
             else:
+                if len(override.index) != len(param.index_sets):
+                    raise self.fail(
+                        f"'{override.parameter}' is indexed by {len(param.index_sets)} "
+                        f"set(s), but this override names {len(override.index)}",
+                        override,
+                    )
                 targets = [override.index]
             for index in targets:
                 overrides.append(ScenarioOverride(

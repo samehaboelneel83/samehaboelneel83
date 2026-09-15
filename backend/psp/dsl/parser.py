@@ -97,6 +97,58 @@ class Parser:
         token = token or self.current
         return ParseError(message, token.line, token.column, self.text, hint)
 
+    def string_value(self, what: str) -> str:
+        """Read a string, joining any that continue on following lines.
+
+        Statements and rationales are prose, and prose does not fit in eighty
+        columns. Adjacent strings concatenate, so a long sentence can be broken
+        wherever it reads best."""
+        parts = [self.expect("string", what=what).value]
+        while True:
+            mark = self.pos
+            # Only across a line break. Two strings on one line are two
+            # different fields — `unit "hours" "how long it takes"` — and
+            # joining those would silently merge them.
+            if not self.at("newline"):
+                break
+            self.advance()
+            if self.at("string"):
+                parts.append(self.advance().value)
+            else:
+                self.pos = mark
+                break
+        return "".join(parts)
+
+    def continues_with(self, keywords: set[str], strings: bool = False) -> bool:
+        """True when the next line carries one of this declaration's attributes.
+
+        Attributes read better under the thing they describe once a declaration
+        grows past a line, which is most of the time. Only the listed keywords
+        continue a declaration, so the next ``set`` or ``constraint`` still
+        starts a new one.
+        """
+        mark = self.pos
+        while self.at("newline"):
+            self.advance()
+        if self.at_any("keyword", keywords) or (strings and self.at("string")):
+            return True
+        self.pos = mark
+        return False
+
+    def trailing_description(self) -> str | None:
+        """A bare string on the line after a declaration describes it.
+
+        Unambiguous, because no declaration begins with a string."""
+        mark = self.pos
+        if self.at("newline"):
+            self.advance()
+        if self.at("string"):
+            text = self.string_value("a description")
+            self.end_of_declaration()
+            return text
+        self.pos = mark
+        return None
+
     def skip_newlines(self) -> None:
         while self.at("newline"):
             self.advance()
@@ -121,7 +173,7 @@ class Parser:
 
         # A bare string on its own line after the header is the description.
         if self.at("string"):
-            program.description = self.advance().value
+            program.description = self.string_value("a description")
             self.end_of_declaration()
 
         while not self.at("end"):
@@ -183,15 +235,17 @@ class Parser:
             node.elements = self.element_list()
 
         while True:
+            self.continues_with({"labels", "of"}, strings=True)
             if self.accept("keyword", "labels"):
                 node.labels = self.label_map()
             elif self.accept("keyword", "of"):
                 node.entity_type = self.identifier("an entity type")
             elif self.at("string"):
-                node.description = self.advance().value
+                node.description = self.string_value("a description")
             else:
                 break
         self.end_of_declaration()
+        node.description = node.description or self.trailing_description()
         return node
 
     def element_list(self) -> list[str]:
@@ -214,7 +268,7 @@ class Parser:
         while not self.at("symbol", "}"):
             key = self.element()
             self.expect("symbol", ":", what="':' after the element")
-            labels[key] = self.expect("string", what="the label, in quotes").value
+            labels[key] = self.string_value("the label, in quotes")
             self.skip_newlines()
             if not self.accept("symbol", ","):
                 break
@@ -231,12 +285,13 @@ class Parser:
         node.index_sets = self.optional_index_sets()
 
         while True:
+            self.continues_with({"default", "unit"}, strings=True)
             if self.accept("keyword", "default"):
                 node.default = self.number()
             elif self.accept("keyword", "unit"):
-                node.unit = self.expect("string", what="the unit, in quotes").value
+                node.unit = self.string_value("the unit, in quotes")
             elif self.at("string"):
-                node.description = self.advance().value
+                node.description = self.string_value("a description")
             else:
                 break
 
@@ -251,6 +306,7 @@ class Parser:
                     )
                 node.values = [([], self.number())]
         self.end_of_declaration()
+        node.description = node.description or self.trailing_description()
         return node
 
     def optional_index_sets(self) -> list[str]:
@@ -319,6 +375,7 @@ class Parser:
             node.ub = 1.0
 
         while True:
+            self.continues_with({"in", "means"}, strings=True)
             if self.accept("keyword", "in"):
                 self.expect("symbol", "[", what="'[' and the bounds")
                 node.lb = self.number()
@@ -327,12 +384,13 @@ class Parser:
                 node.ub = None if upper == float("inf") else upper
                 self.expect("symbol", "]", what="']' to close the bounds")
             elif self.accept("keyword", "means"):
-                node.meaning = self.expect("string", what="what the decision means").value
+                node.meaning = self.string_value("what the decision means")
             elif self.at("string"):
-                node.description = self.advance().value
+                node.description = self.string_value("a description")
             else:
                 break
         self.end_of_declaration()
+        node.description = node.description or self.trailing_description()
         return node
 
     # ---------------------------------------------------------- constraint
@@ -342,7 +400,7 @@ class Parser:
         node = ConstraintDecl(line=start.line, column=start.column)
         node.name = self.identifier("a constraint name")
         if self.at("string"):
-            node.statement = self.advance().value
+            node.statement = self.string_value("what the constraint means")
         self.skip_newlines()
 
         while True:
@@ -350,7 +408,7 @@ class Parser:
                 node.category = self.identifier("a category")
                 self.skip_newlines()
             elif self.accept("keyword", "because"):
-                node.rationale = self.expect("string", what="the reason, in quotes").value
+                node.rationale = self.string_value("the reason, in quotes")
                 self.skip_newlines()
             else:
                 break
@@ -403,10 +461,11 @@ class Parser:
         node = ObjectiveDecl(line=start.line, column=start.column, sense=start.value)
         node.name = self.identifier("an objective name")
         if self.at("string"):
-            node.statement = self.advance().value
+            node.statement = self.string_value("what the objective means")
         while True:
+            self.continues_with({"unit", "weight"})
             if self.accept("keyword", "unit"):
-                node.unit = self.expect("string", what="the unit, in quotes").value
+                node.unit = self.string_value("the unit, in quotes")
             elif self.accept("keyword", "weight"):
                 node.weight = self.number()
             else:
@@ -425,11 +484,11 @@ class Parser:
         start = self.expect("keyword", "assume")
         node = AssumeDecl(line=start.line, column=start.column)
         node.key = self.identifier("an assumption key")
-        node.statement = self.expect("string", what="the assumption, in quotes").value
+        node.statement = self.string_value("the assumption, in quotes")
         self.skip_newlines()
         while True:
             if self.accept("keyword", "because"):
-                node.rationale = self.expect("string", what="the reason, in quotes").value
+                node.rationale = self.string_value("the reason, in quotes")
                 self.skip_newlines()
             elif self.accept("keyword", "affects"):
                 node.affects = [self.identifier("a name")]
@@ -450,7 +509,7 @@ class Parser:
         self.end_of_declaration()
         self.skip_newlines()
         if self.at("string"):
-            node.description = self.advance().value
+            node.description = self.string_value("a description")
             self.end_of_declaration()
             self.skip_newlines()
 

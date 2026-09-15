@@ -9,6 +9,8 @@ nine-hundred-line model for fidelity.
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from psp.compiler import compile_and_flatten
@@ -277,3 +279,93 @@ minimize z "z":
         compile_and_flatten(again).ir.fingerprint()
         == compile_and_flatten(source).ir.fingerprint()
     )
+
+
+EXAMPLES = pathlib.Path(__file__).resolve().parents[2] / "examples"
+
+
+def test_the_commitment_planning_example_is_a_working_model():
+    """A hierarchical commitment plan, written entirely in the language.
+
+    It is the demonstration that a class of problem this shape needs no Python:
+    units compete for limited time, commitments are weighted, mandatory ones
+    cannot be dropped, and load is balanced across units.
+    """
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+    solution = build_solution(compiled, result)
+
+    weight = {v.index[0]: v.value for v in spec.parameter("weight").values}
+    mandatory = {v.index[0] for v in spec.parameter("mandatory").values if v.value == 1}
+    met = {d.index[0] for d in solution.decisions if d.variable == "met"}
+
+    # Mandatory commitments are hard: dropping one is not a trade-off available.
+    assert mandatory <= met, sorted(mandatory - met)
+
+    # The instance is deliberately too tight for everything, so something goes.
+    dropped = set(weight) - met
+    assert dropped, "nothing was dropped, so the weighting is never exercised"
+
+    # What goes is the least valuable — but only among commitments that actually
+    # compete. Two commitments assigned to different units are not a trade-off
+    # against each other, so the ordering is checked per unit.
+    assigned = {
+        (v.index[0], v.index[1]) for v in spec.parameter("assigned").values if v.value == 1
+    }
+    units = {unit for _, unit in assigned}
+    compared = 0
+    for unit in units:
+        rivals = {c for c, u in assigned if u == unit}
+        kept = {c for c in rivals & met if c not in mandatory}
+        lost = rivals & dropped
+        if kept and lost:
+            assert max(weight[c] for c in lost) <= min(weight[c] for c in kept), unit
+            compared += 1
+    assert compared, "no unit had both a kept and a dropped commitment to compare"
+
+    coverage = next(o for o in solution.objectives if o.name == "commitment_coverage")
+    assert coverage.sense == "maximize"
+    assert coverage.value == pytest.approx(sum(weight[c] for c in met))
+
+
+def test_the_commitment_example_responds_to_its_scenarios():
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    weight = {v.index[0]: v.value for v in spec.parameter("weight").values}
+
+    def coverage(scenario=None):
+        compiled = compile_and_flatten(spec, scenario)
+        result, _ = run_solver(compiled.flat, options=OPTIONS)
+        assert result.status == SolveStatus.OPTIMAL, scenario
+        solution = build_solution(compiled, result)
+        met = {d.index[0] for d in solution.decisions if d.variable == "met"}
+        return sum(weight[c] for c in met), met
+
+    baseline, baseline_met = coverage()
+    cut, cut_met = coverage("surge")
+    invested, invested_met = coverage("invest")
+
+    # Less capacity covers less; more covers more. Neither is guaranteed by the
+    # model, so both are worth asserting.
+    assert cut < baseline < invested
+    assert cut_met < baseline_met < invested_met
+    assert invested == pytest.approx(sum(weight.values())), "investing should cover everything"
+
+
+def test_scaling_a_parameter_with_no_values_is_refused():
+    """A scenario that silently changes nothing is worse than one that fails:
+    it reports 'no difference' and nobody looks again."""
+    with pytest.raises(ResolveError, match="nothing for this scenario to change"):
+        parse_problem("""
+problem p "P"
+set A = a
+param cap[A] default 5
+var v[A] binary
+constraint c "At most one"
+  sum(v[i] for i in A) <= 1
+minimize z "z":
+  sum(v[i] for i in A)
+scenario tighter "Half the capacity"
+  scale cap by 0.5
+""")
