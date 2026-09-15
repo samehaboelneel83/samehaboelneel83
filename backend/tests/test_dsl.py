@@ -330,6 +330,111 @@ def test_the_commitment_planning_example_is_a_working_model():
     assert coverage.value == pytest.approx(sum(weight[c] for c in met))
 
 
+def test_the_commitment_example_rolls_time_up_through_its_tree():
+    """A node of the period tree is a range of periods, and one rule rolls every
+    level up through it. The reported load must agree with the allocations, at
+    the horizon, the week and the day alike."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+    solution = build_solution(compiled, result)
+
+    first = {v.index[0]: v.value for v in spec.parameter("first_period").values}
+    last = {v.index[0]: v.value for v in spec.parameter("last_period").values}
+    allowance = spec.parameter("allowance")
+    limit = {tuple(v.index): v.value for v in allowance.values}
+
+    allocated = [
+        (d.index[0], d.index[1], int(d.index[2]))
+        for d in solution.decisions if d.variable == "allocate"
+    ]
+    reported = {
+        (d.index[0], d.index[1]): d.value
+        for d in solution.decisions if d.variable == "load"
+    }
+
+    nodes = compiled.ir.set("TimeNodes").elements
+    units = compiled.ir.set("Units").elements
+    for unit in units:
+        for node in nodes:
+            actual = sum(
+                1 for _, u, p in allocated
+                if u == unit and first[node] <= p <= last[node]
+            )
+            assert reported.get((unit, node), 0.0) == pytest.approx(actual), (unit, node)
+            assert actual <= limit.get((unit, node), allowance.default) + 1e-6
+
+    # The rollup has to be a rollup: a week is its days, the horizon its weeks.
+    for unit in units:
+        weeks = [n for n in nodes if n.startswith("week_")]
+        assert reported.get((unit, "horizon"), 0.0) == pytest.approx(
+            sum(reported.get((unit, w), 0.0) for w in weeks)
+        )
+        for week in weeks:
+            days = [
+                n for n in nodes
+                if first[n] >= first[week] and last[n] <= last[week] and n != week
+            ]
+            assert reported.get((unit, week), 0.0) == pytest.approx(
+                sum(reported.get((unit, d), 0.0) for d in days)
+            )
+
+
+def test_frequency_is_met_inside_each_node_not_merely_in_total():
+    """Six patrols in one week and none in the next is not a fortnight of
+    patrolling, which is the difference between a frequency and a total."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    solution = build_solution(compiled, result)
+
+    first = {v.index[0]: v.value for v in spec.parameter("first_period").values}
+    last = {v.index[0]: v.value for v in spec.parameter("last_period").values}
+    required = {tuple(v.index): v.value for v in spec.parameter("required_in").values}
+    met = {d.index[0] for d in solution.decisions if d.variable == "met"}
+    allocated = [
+        (d.index[0], int(d.index[2]))
+        for d in solution.decisions if d.variable == "allocate"
+    ]
+
+    assert required, "the example states no frequencies, so this proves nothing"
+    for (commitment, node), needed in required.items():
+        inside = sum(
+            1 for c, p in allocated
+            if c == commitment and first[node] <= p <= last[node]
+        )
+        assert inside == (needed if commitment in met else 0), (commitment, node)
+
+
+def test_specialty_capacity_binds_at_the_parent_not_only_the_leaves():
+    """The point of a specialty tree: crafts that each fit can still overrun the
+    capability they share. A flat model would see no constraint at all."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+
+    def binding_nodes(scenario=None):
+        compiled = compile_and_flatten(spec, scenario)
+        result, _ = run_solver(compiled.flat, options=OPTIONS)
+        assert result.status == SolveStatus.OPTIMAL, scenario
+        solution = build_solution(compiled, result)
+        counts: dict[str, int] = {}
+        for outcome in solution.binding_constraints:
+            if outcome.name == "specialty_capacity_at_every_level":
+                counts[outcome.index[0]] = counts.get(outcome.index[0], 0) + 1
+        return counts
+
+    baseline = binding_nodes()
+    # Interior nodes of the tree, not just the crafts at its leaves.
+    assert baseline.get("capability", 0) >= 1
+    assert {"field", "classroom"} & set(baseline)
+
+    # Cutting the root alone bites hard, while every leaf is untouched.
+    serialised = binding_nodes("serialised_organisation")
+    assert serialised["capability"] > baseline.get("capability", 0) * 5
+    for craft in ("mounted", "dismounted", "teaching", "examining"):
+        assert serialised.get(craft, 0) == baseline.get(craft, 0)
+
+
 def test_the_commitment_example_responds_to_its_scenarios():
     spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
     weight = {v.index[0]: v.value for v in spec.parameter("weight").values}

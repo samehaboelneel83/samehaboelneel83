@@ -119,7 +119,9 @@ class Parser:
                 break
         return "".join(parts)
 
-    def continues_with(self, keywords: set[str], strings: bool = False) -> bool:
+    def continues_with(
+        self, keywords: set[str], strings: bool = False, symbols: set[str] | None = None
+    ) -> bool:
         """True when the next line carries one of this declaration's attributes.
 
         Attributes read better under the thing they describe once a declaration
@@ -130,7 +132,11 @@ class Parser:
         mark = self.pos
         while self.at("newline"):
             self.advance()
-        if self.at_any("keyword", keywords) or (strings and self.at("string")):
+        if (
+            self.at_any("keyword", keywords)
+            or (strings and self.at("string"))
+            or (symbols and self.at_any("symbol", symbols))
+        ):
             return True
         self.pos = mark
         return False
@@ -425,6 +431,7 @@ class Parser:
             self.skip_newlines()
 
         node.lhs = self.expression()
+        self.continues_with(set(), symbols=set(RELATIONS))
         if not self.at_any("symbol", RELATIONS):
             raise self.error(
                 "a constraint needs a relation",
