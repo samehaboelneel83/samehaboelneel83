@@ -755,8 +755,10 @@ class LectureTimetablingTemplate(ProblemTemplate):
                         category="physical",
                         rationale="Two sessions closer together than the walk between their "
                                   "buildings cannot both be attended.",
-                        forall=over(t="Slots", d="Gaps", b1="Buildings", b2="Buildings",
-                                    **bindings),
+                        # Subject first, so the row reads
+                        # "cs_y2_b2, Sun 08:30, 1 period, annex to main".
+                        forall=over(**bindings, t="Slots", d="Gaps",
+                                    b1="Buildings", b2="Buildings"),
                         where=all_of(*guards),
                         rel=le(
                             add(
