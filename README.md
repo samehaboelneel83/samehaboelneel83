@@ -154,6 +154,28 @@ one person is away, the plan leaves *Monday* uncovered, because that is the one
 uncovered day that also saves a request. Both its answers are checked against
 arithmetic done by hand.
 
+### When there is no plan
+
+An infeasible solve comes back with the reason attached, not just the status:
+
+```
+No plan satisfies every rule. 1 would have to give.
+cover_the_night[Tuesday night]: asks for 0 against a limit of 2, so it is under by 2.
+  The rule: Each night is staffed to the level it needs
+```
+
+The model is copied, every rule in the copy is allowed to bend, and it is
+solved twice — once for the fewest rules that must give, then for the least
+they can give by. What comes back is the rules, the quantity against each, and
+the parameters behind them with their sources. The real model is never
+relaxed: the elastic copy lives for the length of the diagnosis and is thrown
+away.
+
+`examples/ward_cover.psp` is the worked example, and exists to be infeasible.
+Two nights need two nurses each, one nurse is on leave, and nobody may work
+twice: four needed, two available. Its scenarios buy a little help (short by
+one instead of two) and then enough (a plan, and nothing to diagnose).
+
 ### Quadratic objectives
 
 An objective may multiply two decisions. Nothing else may:

@@ -94,21 +94,27 @@ parameter-valued is small and worth doing when something needs it.
 
 ---
 
-## Phase 2 — Infeasibility diagnosis
+## Phase 2 — Infeasibility diagnosis — **done**
 
-On an infeasible model, re-solve it elastic, find a minimal set of constraints
-whose relaxation restores feasibility, and report it in the language already
-attached to each row: its statement, its category, its rationale, and the
-parameters that fed it. Then the resolutions — which parameter to move and by
-how much — which the sensitivity machinery can already answer.
+An infeasible solve carries a diagnosis, over the API and the socket alike. The
+model is copied, every hard row in the copy is given room to bend and an
+indicator that counts when it does, and it is solved twice: fewest rules first,
+then least movement. Conflicts come back with the rule, its statement, the
+quantity and direction of the shortfall, and the parameters behind it with
+their sources; resolutions lead with the exact amount.
 
-**Why second.** It is the highest-value item on the list. Explaining a solution
-is good; explaining the *absence* of one is what a conventional optimiser will
-not do, and it is what turns this from a planner into decision support.
+Delivered with `examples/ward_cover.psp`, which exists to be infeasible and
+whose shortfall drops from two to one to none across its scenarios.
 
-**Done when** an over-committed instance returns the conflicting constraints,
-the quantity of the shortfall, and a ranked list of relaxations — not a status
-string.
+Two things deliberately left for later, both recorded in `DECISIONS.md`:
+
+* It is a **repair**, not an irreducible infeasible subsystem. "Move these,
+  this far" is what a planner needs; "these rules contradict each other" is a
+  different and also useful answer, and nothing here forecloses adding it.
+* Resolutions name the parameters behind a conflict but not how far to move
+  each one. Doing that properly means re-solving per parameter, which is what
+  `psp/execution/sensitivity.py` already does for feasible models — extending
+  it to infeasible ones is the obvious next increment.
 
 ---
 

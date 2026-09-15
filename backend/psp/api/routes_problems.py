@@ -177,6 +177,11 @@ def solve(
         "statistics": outcome["statistics"],
         "selection": outcome["selection"],
         "solution": outcome["solution"].model_dump(mode="json"),
+        "diagnosis": (
+            outcome["diagnosis"].model_dump(mode="json")
+            if outcome["diagnosis"] is not None
+            else None
+        ),
     }
 
 

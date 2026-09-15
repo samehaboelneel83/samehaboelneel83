@@ -171,6 +171,41 @@ roster still chooses CP-SAT.
 
 ---
 
+### Diagnose an infeasible model by repair, not by irreducibility
+
+Faced with no plan, the platform reports the fewest rules that would have to
+give and by how much — not an irreducible infeasible subsystem.
+
+The two answer different questions. An IIS says "these rules are mutually
+contradictory", which is a proof; a repair says "move these, this far", which
+is a plan. A planner is trying to get a roster out, so the second is the one
+worth computing, and it comes with quantities the first cannot give.
+
+Fewest rules comes first, then least movement, because a list of thirty rules
+each off by a fraction is not something anyone can act on. It has a known
+failure mode — one rule relaxed enormously can beat two relaxed slightly — and
+that is why the quantity is always reported beside the rule rather than left
+implicit.
+
+The indicator that makes "fewest" askable is a big-M, which this platform
+otherwise refuses to generate. It is allowed here because the constant is the
+row's own reach, computed from the columns the row is built from, and because
+it lives in a throwaway copy that is never solved for an answer.
+
+---
+
+### Diagnosis never touches the model it diagnoses
+
+The elastic model is built as a copy, used, and dropped. Nothing in the stored
+problem becomes soft, and the run that failed stays failed.
+
+The alternative — relaxing in place and returning the relaxed answer — would
+mean a plan could come back having quietly broken a rule the author wrote as
+absolute, with only a status field to say so. That is the failure mode this
+whole platform is built to avoid, and it is not worth one fewer object.
+
+---
+
 ### An explicitly requested solver is never substituted
 
 Falling back to a capable engine when the requested one cannot take the model

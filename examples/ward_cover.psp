@@ -1,0 +1,76 @@
+# A ward that cannot be covered, and why.
+#
+# This model exists to be infeasible. Every other example here is a plan; this
+# one is the question a planner actually asks when there is no plan — which
+# rule is in the way, by how much, and what would have to change.
+#
+# The arithmetic is small enough to check by eye. Two nights each need two
+# nurses, so four nurse-nights are required. Cleo is on leave all week, and
+# nobody may work more than one night, so ada and bram can supply two between
+# them. Four needed, two available.
+#
+# Asked to solve this, a solver says "infeasible" and stops. Asked to diagnose
+# it, the platform relaxes every rule at once, finds the fewest that have to
+# give and the least they can give by, and reports those with the statements
+# and the parameters already attached to them. Nothing in this file is relaxed
+# to do that: the elastic copy lives for the length of the diagnosis.
+#
+# The two scenarios are the two things a planner does next. One buys a little
+# help and the shortfall drops from two to one — still no plan, but a measured
+# distance from one. The other buys enough, and there is nothing to diagnose.
+
+problem ward_cover "Ward night cover"
+  "Staff every night with the nurses it needs, from those who can work and "
+  "within the nights each of them may be asked for."
+
+set Nurses = ada, bram, cleo of nurse
+set Nights = mon, tue of night
+  labels { mon: "Monday night", tue: "Tuesday night" }
+
+param needed[Nights] "Nurses this night needs" = { mon: 2, tue: 2 }
+
+param can_work[Nurses, Nights] default 1 "1 when the nurse can work that night" = {
+    (cleo, mon): 0, (cleo, tue): 0 }
+
+param nights_allowed[Nurses] default 1 "Most nights any one nurse may be asked for"
+
+var on_duty[Nurses, Nights] binary means "Put this nurse on this night"
+
+constraint cover_the_night "Each night is staffed to the level it needs"
+  category regulatory
+  because "Night cover is a licensing condition, not a preference, which is why "
+          "it is stated as a rule that holds rather than one with a price"
+  forall n in Nights:
+    sum(on_duty[p, n] for p in Nurses) >= needed[n]
+
+constraint only_if_they_can_work "Nobody is rostered on a night they cannot work"
+  category physical
+  forall p in Nurses, n in Nights where can_work[p, n] == 0:
+    on_duty[p, n] == 0
+
+constraint within_nights_allowed "Nobody is asked for more nights than allowed"
+  category regulatory
+  forall p in Nurses:
+    sum(on_duty[p, n] for n in Nights) <= nights_allowed[p]
+
+minimize nights_worked "Nights worked in total" unit "nurse-nights":
+  sum(on_duty[p, n] for p in Nurses, n in Nights)
+
+assume leave_is_absolute "A nurse on leave cannot be rostered at any price"
+  because "It is the one rule here that no amount of need can buy, which is what "
+          "separates it from the two that could in principle be argued"
+  affects only_if_they_can_work
+
+scenario agency_for_one_night "An agency nurse is engaged for Monday"
+  "One extra pair of hands, on one night, within the usual limit. Monday can "
+  "now be staffed, which leaves Tuesday one nurse short instead of two: the "
+  "ward is still impossible, and the diagnosis says by how much less."
+  set can_work[cleo, mon] to 1
+
+scenario agency_for_the_week "An agency nurse is engaged for both nights"
+  "The same nurse, released from the one-night limit. Four nurse-nights are "
+  "now available for four needed, and there is a plan — so there is nothing "
+  "to diagnose."
+  set can_work[cleo, mon] to 1
+  set can_work[cleo, tue] to 1
+  set nights_allowed[cleo] to 2

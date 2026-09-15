@@ -166,12 +166,47 @@ export interface Solution {
   warnings: string[];
 }
 
+export interface Conflict {
+  key: string;
+  name: string;
+  statement: string | null;
+  index: string[];
+  label: string | null;
+  op: string;
+  rhs: number;
+  asks_for: number;
+  shortfall: number;
+  direction: string;
+  parameters: { parameter: string; description: string | null; unit: string | null; sources: string[] }[];
+}
+
+export interface Resolution {
+  kind: string;
+  target: string;
+  description: string | null;
+  amount: number | null;
+  unit: string | null;
+  note: string;
+}
+
+export interface Diagnosis {
+  diagnosed: boolean;
+  method: string;
+  conflicts: Conflict[];
+  resolutions: Resolution[];
+  rules_that_must_give: number;
+  total_shortfall: number;
+  message: string | null;
+  narrative: string[];
+}
+
 export interface SolveResponse {
   run_id: string;
   solution_id: string | null;
   model_version_id: string;
   fingerprint: string;
   statistics: ModelStatistics;
+  diagnosis: Diagnosis | null;
   selection: {
     solver: string;
     requested: string | null;

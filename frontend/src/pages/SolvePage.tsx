@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { ApiError, api, solveStreaming } from "../lib/api";
-import type { SolveResponse, Solution } from "../lib/types";
+import type { Diagnosis, SolveResponse, Solution } from "../lib/types";
 import { Badge, Card, Empty, Notice, Stat, num, statusKind } from "../components/common";
 
 interface Stage {
@@ -25,7 +25,11 @@ export default function SolvePage({
 }: {
   problemKey: string | null;
   scenarios: string[];
-  onSolved: (response: { solutionId: string | null; solution: Solution }) => void;
+  onSolved: (response: {
+    solutionId: string | null;
+    solution: Solution;
+    diagnosis: Diagnosis | null;
+  }) => void;
 }) {
   const [scenario, setScenario] = useState("");
   const [solver, setSolver] = useState("");
@@ -64,7 +68,11 @@ export default function SolvePage({
       );
       const result = final.solution as Solution;
       setSolution(result);
-      onSolved({ solutionId: (final.solution_id as string) ?? null, solution: result });
+      onSolved({
+        solutionId: (final.solution_id as string) ?? null,
+        solution: result,
+        diagnosis: (final.diagnosis as Diagnosis | null) ?? null,
+      });
     } catch (e) {
       setError(String((e as Error).message));
     } finally {
@@ -87,7 +95,11 @@ export default function SolvePage({
       });
       setSolution(response.solution);
       setSelection(response.selection);
-      onSolved({ solutionId: response.solution_id, solution: response.solution });
+      onSolved({
+        solutionId: response.solution_id,
+        solution: response.solution,
+        diagnosis: response.diagnosis ?? null,
+      });
     } catch (e) {
       setError(String((e as Error).message));
       if (e instanceof ApiError) setConsidered(e.considered);

@@ -18,8 +18,10 @@ from psp.compiler.errors import CompileError
 from psp.compiler.pipeline import compile_and_flatten
 from psp.db import models as m
 from psp.db.base import SessionLocal
+from psp.execution.diagnosis import diagnose
 from psp.execution.runner import run_solver
 from psp.execution.service import load_spec, persist_model_version, persist_run
+from psp.solvers.base import SolveStatus
 from psp.provenance.solution import build_solution
 
 router = APIRouter()
@@ -82,6 +84,16 @@ async def _run_one(websocket: WebSocket, request: dict) -> None:
         })
 
         solution = build_solution(compiled, result)
+        diagnosis = (
+            diagnose(compiled, options)
+            if result.status == SolveStatus.INFEASIBLE
+            else None
+        )
+        if diagnosis is not None:
+            await websocket.send_json({
+                "stage": "diagnosing",
+                "detail": f"{diagnosis.rules_that_must_give} rule(s) would have to give",
+            })
         version = persist_model_version(session, problem, compiled, trace["considered"])
         run, stored = persist_run(
             session, problem, version, compiled, result, solution, trace, options
@@ -93,6 +105,9 @@ async def _run_one(websocket: WebSocket, request: dict) -> None:
             "run_id": run.id,
             "solution_id": stored.id if stored else None,
             "solution": solution.model_dump(mode="json"),
+            "diagnosis": (
+                diagnosis.model_dump(mode="json") if diagnosis is not None else None
+            ),
         })
     finally:
         session.close()

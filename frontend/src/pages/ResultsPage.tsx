@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
-import type { Explanation, ProvenanceGraph, Solution } from "../lib/types";
+import type { Diagnosis, Explanation, ProvenanceGraph, Solution } from "../lib/types";
 import { Badge, Card, Empty, Notice, num, signed, statusKind } from "../components/common";
 
 const CHAIN = [
@@ -26,9 +26,11 @@ const CHAIN = [
 export default function ResultsPage({
   solution,
   solutionId,
+  diagnosis,
 }: {
   solution: Solution | null;
   solutionId: string | null;
+  diagnosis: Diagnosis | null;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
@@ -72,10 +74,65 @@ export default function ResultsPage({
             {w}
           </Notice>
         ))}
-        <p className="muted">
-          An infeasible result is information: it says the constraints and the data cannot both
-          hold. Compare against the baseline scenario to see which change caused it.
-        </p>
+        {diagnosis?.diagnosed ? (
+          <>
+            <h3>What stands in the way</h3>
+            <p className="muted">
+              {diagnosis.rules_that_must_give === 1
+                ? "One rule would have to give."
+                : `${diagnosis.rules_that_must_give} rules would have to give.`}{" "}
+              Found by letting every rule bend at once and keeping the fewest that had to.
+            </p>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rule</th>
+                    <th className="num">Asks for</th>
+                    <th className="num">Limit</th>
+                    <th className="num">Short by</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diagnosis.conflicts.map((c) => (
+                    <tr key={c.key}>
+                      <td>
+                        <span className="mono">{c.label ?? c.key}</span>
+                        {c.statement && <div className="muted">{c.statement}</div>}
+                        {c.parameters.length > 0 && (
+                          <div className="muted">
+                            built from {c.parameters.map((p) => p.parameter).join(", ")}
+                          </div>
+                        )}
+                      </td>
+                      <td className="num">{num(c.asks_for)}</td>
+                      <td className="num">{num(c.rhs)}</td>
+                      <td className="num">
+                        {num(c.shortfall)} <span className="muted">{c.direction}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h3>What would resolve it</h3>
+            <ul>
+              {diagnosis.resolutions.map((r, i) => (
+                <li key={`${r.kind}:${r.target}:${i}`}>
+                  <span className="mono">{r.target}</span>
+                  {r.amount !== null && <> — by {num(r.amount)}</>}
+                  <div className="muted">{r.note}</div>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="muted">
+            {diagnosis?.message ??
+              "An infeasible result is information: it says the constraints and the data cannot both hold. Compare against the baseline scenario to see which change caused it."}
+          </p>
+        )}
       </Card>
     );
   }

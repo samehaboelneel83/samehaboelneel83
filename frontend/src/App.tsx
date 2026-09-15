@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "./lib/api";
-import type { ProblemSummary, Solution } from "./lib/types";
+import type { Diagnosis, ProblemSummary, Solution } from "./lib/types";
 import { Badge, Notice } from "./components/common";
 import AuthorPage from "./pages/AuthorPage";
 import DomainPage from "./pages/DomainPage";
@@ -37,6 +37,7 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [solution, setSolution] = useState<Solution | null>(null);
   const [solutionId, setSolutionId] = useState<string | null>(null);
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [health, setHealth] = useState<{ authentication: string; warnings: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +73,7 @@ export default function App() {
     // show results for something the user is no longer looking at.
     setSolution(null);
     setSolutionId(null);
+    setDiagnosis(null);
   }
 
   return (
@@ -135,14 +137,17 @@ export default function App() {
           <SolvePage
             problemKey={selected}
             scenarios={scenarios}
-            onSolved={({ solutionId: id, solution: result }) => {
+            onSolved={({ solutionId: id, solution: result, diagnosis: why }) => {
               setSolution(result);
               setSolutionId(id);
+              setDiagnosis(why);
               setStep("results");
             }}
           />
         )}
-        {step === "results" && <ResultsPage solution={solution} solutionId={solutionId} />}
+        {step === "results" && (
+          <ResultsPage solution={solution} solutionId={solutionId} diagnosis={diagnosis} />
+        )}
       </main>
     </div>
   );

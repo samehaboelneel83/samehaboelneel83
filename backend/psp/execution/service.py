@@ -16,11 +16,12 @@ from sqlalchemy.orm import Session
 
 from psp.compiler.pipeline import CompiledProblem, compile_and_flatten
 from psp.db import models as m
+from psp.execution.diagnosis import diagnose
 from psp.execution.runner import run_solver
 from psp.problem.spec import ProblemSpec
 from psp.provenance.chain import build_graph
 from psp.provenance.solution import Solution, build_solution
-from psp.solvers.base import SolveOptions, SolveResult
+from psp.solvers.base import SolveOptions, SolveResult, SolveStatus
 
 
 def load_spec(problem: m.Problem) -> ProblemSpec:
@@ -279,6 +280,12 @@ def solve_problem(
     compiled = compile_and_flatten(spec, scenario_key)
     result, trace = run_solver(compiled.flat, solver=solver, options=options)
     solution = build_solution(compiled, result)
+    # An infeasible run is the one case where the answer is worth more work than
+    # the question was: "infeasible" is a status, and what the caller needs is
+    # which rules are fighting and by how much.
+    diagnosis = (
+        diagnose(compiled, options) if result.status == SolveStatus.INFEASIBLE else None
+    )
     version = persist_model_version(session, problem, compiled, trace["considered"])
     run, stored = persist_run(
         session, problem, version, compiled, result, solution, trace, options, requested_by
@@ -291,6 +298,7 @@ def solve_problem(
         "statistics": compiled.flat.stats(),
         "selection": trace,
         "solution": solution,
+        "diagnosis": diagnosis,
         "compiled": compiled,
     }
 
