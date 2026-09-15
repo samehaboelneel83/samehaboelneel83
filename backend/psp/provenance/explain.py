@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from psp.compiler.pipeline import CompiledProblem
 from psp.ir.walk import constraint_parameters
+from psp.provenance.labels import LabelResolver
 from psp.provenance.solution import Solution
 
 
@@ -26,6 +27,7 @@ class ParameterEvidence(BaseModel):
 class ConstraintEvidence(BaseModel):
     key: str
     name: str
+    label: str | None = None
     statement: str | None = None
     category: str | None = None
     rationale: str | None = None
@@ -40,6 +42,7 @@ class ConstraintEvidence(BaseModel):
 
 class Explanation(BaseModel):
     decision: str
+    label: str | None = None
     value: float
     meaning: str | None = None
     objective_contribution: dict[str, float] = Field(default_factory=dict)
@@ -60,6 +63,7 @@ def explain_decision(
 
     value = solution.values.get(variable_key, 0.0)
     var = flat.var_index[variable_key]
+    labels = LabelResolver(compiled.ir)
     meaning = next(
         (v.decision_meaning or v.description
          for v in compiled.spec.variables if v.name == var.name),
@@ -83,6 +87,7 @@ def explain_decision(
         evidence = ConstraintEvidence(
             key=row.key,
             name=row.name,
+            label=labels.constraint(row.name, row.index),
             statement=row.statement,
             category=spec_constraint.category if spec_constraint else None,
             rationale=spec_constraint.rationale if spec_constraint else None,
@@ -107,6 +112,7 @@ def explain_decision(
 
     explanation = Explanation(
         decision=variable_key,
+        label=labels.variable(var.name, var.index),
         value=value,
         meaning=meaning,
         objective_contribution=contribution,
@@ -139,8 +145,8 @@ def _narrate(explanation: Explanation, variable_name: str) -> list[str]:
     that can drift is worse than none.
     """
     lines: list[str] = []
-    verb = "was set to"
-    lines.append(f"'{explanation.decision}' {verb} {explanation.value:g}.")
+    shown = explanation.label or explanation.decision
+    lines.append(f"'{shown}' was set to {explanation.value:g}.")
     if explanation.meaning:
         lines.append(f"This means: {explanation.meaning.lower().rstrip('.')}.")
     if explanation.scenario:
@@ -155,7 +161,8 @@ def _narrate(explanation: Explanation, variable_name: str) -> list[str]:
             "these are what stop the value moving further:"
         )
         for evidence in explanation.limited_by[:5]:
-            detail = f"  - {evidence.key}: {evidence.statement or evidence.name}"
+            named = evidence.label or evidence.key
+            detail = f"  - {named}: {evidence.statement or evidence.name}"
             if evidence.marginal_effect:
                 detail += (
                     f" — one more unit of headroom here would change "

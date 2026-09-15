@@ -61,7 +61,8 @@ def compile_problem(
     _validate(spec)
 
     sets = [
-        IRSet(name=s.name, kind=s.kind, elements=list(s.elements), description=s.description)
+        IRSet(name=s.name, kind=s.kind, elements=list(s.elements),
+              description=s.description, labels=dict(s.labels))
         for s in spec.sets
     ]
     for s, ir_set in zip(spec.sets, sets, strict=True):

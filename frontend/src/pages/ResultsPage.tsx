@@ -103,7 +103,7 @@ export default function ResultsPage({
                     className={`clickable ${selected === d.key ? "selected" : ""}`}
                     onClick={() => void explain(d.key)}
                   >
-                    <td className="mono">{d.key}</td>
+                    <td className="mono" title={d.key}>{d.label ?? d.key}</td>
                     <td className="num">{num(d.value)}</td>
                     <td className="muted">{d.meaning}</td>
                   </tr>
@@ -133,7 +133,7 @@ export default function ResultsPage({
                   {solution.binding_constraints.map((c) => (
                     <tr key={c.key}>
                       <td>
-                        <div className="mono">{c.key}</div>
+                        <div className="mono" title={c.key}>{c.label ?? c.key}</div>
                         <div className="muted">{c.statement}</div>
                       </td>
                       <td className="num">{num(c.rhs)}</td>
@@ -163,7 +163,10 @@ export default function ResultsPage({
       {error && <Notice kind="bad">{error}</Notice>}
 
       {explanation && (
-        <Card title={`Why ${explanation.decision}?`} subtitle="Derived from the model, not generated.">
+        <Card
+          title={`Why ${explanation.label ?? explanation.decision}?`}
+          subtitle="Derived from the model, not generated."
+        >
           <div className="narrative">
             <ul>
               {explanation.narrative.map((line, index) => (
@@ -189,7 +192,7 @@ export default function ResultsPage({
                   {explanation.limited_by.map((e) => (
                     <tr key={e.key}>
                       <td>
-                        <div className="mono">{e.key}</div>
+                        <div className="mono" title={e.key}>{e.label ?? e.key}</div>
                         <div className="muted">{e.statement}</div>
                       </td>
                       <td>

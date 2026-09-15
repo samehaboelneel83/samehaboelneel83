@@ -22,6 +22,7 @@ from psp.db import models as m
 from psp.execution import sensitivity as sensitivity_module
 from psp.execution.service import load_spec, persist_problem, solve_problem
 from psp.problem.templates.registry import get as get_template
+from psp.provenance.labels import LabelResolver
 from psp.solvers.registry import UnsupportedModelError
 
 router = APIRouter(prefix="/problems", tags=["problems"])
@@ -121,6 +122,7 @@ def compile_problem_endpoint(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": str(exc), "where": exc.where},
         ) from exc
+    labels = LabelResolver(compiled.ir)
     return {
         "fingerprint": compiled.ir.fingerprint(),
         "scenario": scenario,
@@ -130,6 +132,7 @@ def compile_problem_endpoint(
         "record": compiled.record.to_dict(),
         "constraint_rows": [
             {"key": c.key, "name": c.name, "statement": c.statement,
+             "label": labels.constraint(c.name, c.index),
              "op": c.op, "rhs": c.rhs, "terms": len(c.terms)}
             for c in compiled.flat.constraints[:500]
         ],

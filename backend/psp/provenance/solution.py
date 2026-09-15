@@ -11,6 +11,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from psp.compiler.pipeline import CompiledProblem
+from psp.provenance.labels import LabelResolver
 from psp.solvers.base import SolveResult
 
 TOLERANCE = 1e-6
@@ -33,6 +34,9 @@ class Decision(BaseModel):
     key: str
     value: float
     meaning: str | None = None
+    label: str | None = None
+    """The key with its indices rendered for a reader, when any set declares
+    labels. ``key`` stays the identifier; this is only for display."""
 
 
 class ConstraintOutcome(BaseModel):
@@ -40,6 +44,7 @@ class ConstraintOutcome(BaseModel):
     name: str
     statement: str | None = None
     index: list[str] = Field(default_factory=list)
+    label: str | None = None
     activity: float
     op: str
     rhs: float
@@ -161,6 +166,7 @@ def _decisions(compiled: CompiledProblem, values: dict[str, float]) -> list[Deci
     meanings = {
         v.name: v.decision_meaning or v.description for v in compiled.spec.variables
     }
+    labels = LabelResolver(compiled.ir)
     out: list[Decision] = []
     for var in compiled.flat.variables:
         value = values.get(var.key, 0.0)
@@ -170,6 +176,7 @@ def _decisions(compiled: CompiledProblem, values: dict[str, float]) -> list[Deci
             Decision(
                 variable=var.name, index=var.index, key=var.key,
                 value=value, meaning=meanings.get(var.name),
+                label=labels.variable(var.name, var.index),
             )
         )
     out.sort(key=lambda d: (d.variable, d.index))
@@ -190,6 +197,7 @@ def _constraints(
         direction = 1.0 if components[0]["sense"] == "minimize" else -1.0
         scale = direction * float(components[0]["weight"])
 
+    labels = LabelResolver(compiled.ir)
     binding: list[ConstraintOutcome] = []
     slack_rows: list[ConstraintOutcome] = []
     for c in compiled.flat.constraints:
@@ -203,6 +211,7 @@ def _constraints(
             slack = abs(activity - c.rhs)
         outcome = ConstraintOutcome(
             key=c.key, name=c.name, statement=c.statement, index=c.index,
+            label=labels.constraint(c.name, c.index),
             activity=activity, op=c.op, rhs=c.rhs, slack=slack,
             binding=abs(slack) <= max(TOLERANCE, abs(c.rhs) * 1e-9),
             shadow_price=dual,

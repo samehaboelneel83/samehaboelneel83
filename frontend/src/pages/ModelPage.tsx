@@ -216,7 +216,7 @@ export default function ModelPage({
               <tbody>
                 {compiled.constraint_rows.map((row) => (
                   <tr key={row.key}>
-                    <td className="mono">{row.key}</td>
+                    <td className="mono" title={row.key}>{row.label ?? row.key}</td>
                     <td className="mono muted">{row.name}</td>
                     <td className="num">{row.terms}</td>
                     <td className="mono">

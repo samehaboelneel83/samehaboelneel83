@@ -94,6 +94,7 @@ export interface CompileResponse {
   constraint_rows: Array<{
     key: string;
     name: string;
+    label: string | null;
     statement: string | null;
     op: string;
     rhs: number;
@@ -115,11 +116,14 @@ export interface Decision {
   key: string;
   value: number;
   meaning: string | null;
+  /** The key rendered for a reader, when the model's sets declare labels. */
+  label: string | null;
 }
 
 export interface ConstraintOutcome {
   key: string;
   name: string;
+  label: string | null;
   statement: string | null;
   index: string[];
   activity: number;
@@ -162,11 +166,13 @@ export interface SolveResponse {
 
 export interface Explanation {
   decision: string;
+  label: string | null;
   value: number;
   meaning: string | null;
   objective_contribution: Record<string, number>;
   limited_by: Array<{
     key: string;
+    label: string | null;
     statement: string | null;
     category: string | null;
     rationale: string | null;

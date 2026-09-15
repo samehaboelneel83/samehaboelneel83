@@ -660,12 +660,17 @@ class LectureTimetablingTemplate(ProblemTemplate):
                            description="What is scheduled: a course, lecturer and groups together"),
                 ProblemSet(name="Rooms", elements=room_keys, entity_type="room",
                            description="Teaching rooms"),
+                # Slots and days must be numeric for the compiler to do arithmetic
+                # on them, and must read as times for anyone looking at the
+                # answer. The label map is what reconciles the two.
                 ProblemSet(name="Slots", kind="int",
                            elements=[str(t) for t in range(total_slots)],
                            description=f"{len(days)} days x {slots_per_day} periods, numbered "
-                                       "across the week"),
+                                       "across the week",
+                           labels=readable_slots),
                 ProblemSet(name="Days", kind="int", elements=[str(d) for d in range(len(days))],
-                           description="Teaching days: " + ", ".join(days)),
+                           description="Teaching days: " + ", ".join(days),
+                           labels={str(d): day for d, day in enumerate(days)}),
                 ProblemSet(name="Lecturers", elements=lecturers, entity_type="lecturer",
                            description="Teaching staff"),
                 ProblemSet(name="Groups", elements=group_keys, entity_type="student_group",

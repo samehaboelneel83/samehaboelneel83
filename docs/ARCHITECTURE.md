@@ -129,6 +129,21 @@ Where duals do not exist, the platform says *why* — an integer model has none 
 give, a combinatorial engine does not compute them — because those two have
 different remedies ("use sensitivity analysis" versus "re-solve with HiGHS").
 
+## Readable keys
+
+A key like `place[algo_y2,hall_a,23]` is right for the compiler and useless to
+the person reading the timetable. Slot 23 has to stay numeric — the compiler
+does arithmetic on it to work out what is running at a given moment — and has
+to read `Thu 13:45` in the answer.
+
+So a set may carry a label map, and the rendering layer applies it to decisions,
+binding constraints, explanations and generated rows alike. Labels live on the
+IR rather than being looked up from the problem at render time, so a model
+stored today still explains readably in a year. They are presentation only: the
+raw key stays the identifier in `Solution.values`, in provenance rows and in the
+explain API, so nothing downstream has to parse a display string back into an
+index.
+
 ## Data model
 
 Eight layers: IAM, DOMAIN, PROBLEM, MODEL, SOLVER, EXECUTION, SOLUTION,

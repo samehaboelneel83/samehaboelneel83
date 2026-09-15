@@ -26,6 +26,10 @@ class IRSet(BaseModel):
     kind: SetKind = "label"
     elements: list[str] = Field(default_factory=list)
     description: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    """Human-readable form of each element. Carried on the IR rather than
+    looked up from the problem at render time, so a model stored today can
+    still be explained readably in a year."""
 
     @field_validator("elements")
     @classmethod

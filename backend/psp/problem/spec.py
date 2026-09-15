@@ -44,6 +44,13 @@ class ProblemSet(BaseModel):
     elements: list[str] = Field(default_factory=list)
     entity_type: str | None = None
     description: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    """How each element should read to a person, keyed by element.
+
+    An integer set is the case that needs this: slot 23 has to be numeric for
+    the compiler to do arithmetic on it, and has to read "Thu 13:45" for anyone
+    looking at the answer. Elements missing from the map fall back to
+    themselves, so a partial map is fine."""
 
 
 class ProblemParameter(BaseModel):

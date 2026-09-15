@@ -287,3 +287,76 @@ def test_model_is_fully_discrete_so_cpsat_takes_it():
     assert set(stats["variable_kinds"]) == {"binary"}
     _, trace = run_solver(compiled.flat, options=OPTIONS)
     assert trace["solver"] == "cpsat"
+
+
+def test_slots_read_as_times_everywhere_they_are_shown():
+    """A numeric slot has to stay numeric for the compiler and read as a time
+    for the reader. The label map is what reconciles those, so it has to reach
+    decisions, binding constraints and the narrative alike."""
+    from psp.provenance import explain_decision
+
+    data = get("lecture_timetabling").example()
+    spec, compiled, result, solution, _ = solve(data)
+    assert result.status == SolveStatus.OPTIMAL
+
+    # The set still carries plain integers — labelling must not have leaked
+    # into the elements the compiler does arithmetic on.
+    slots = compiled.ir.set("Slots")
+    assert slots.kind == "int"
+    assert all(e.isdigit() for e in slots.elements)
+    assert slots.labels["23"] == "Thu 13:45"
+
+    for decision in solution.decisions:
+        assert decision.label, decision.key
+        # The raw key stays the identifier; the label is display only.
+        assert decision.key in solution.values
+        slot = decision.index[2]
+        assert slots.labels[slot] in decision.label
+        assert decision.variable in decision.label
+
+    slot_indexed = [
+        c for c in solution.binding_constraints
+        if c.name in ("lecturer_no_overlap", "room_no_overlap", "group_no_overlap")
+    ]
+    assert slot_indexed, "no slot-indexed constraint was binding"
+    for outcome in slot_indexed:
+        assert outcome.label and ":" in outcome.label, outcome.key
+
+    explanation = explain_decision(compiled, solution, solution.decisions[0].key)
+    assert explanation.label
+    assert ":" in explanation.narrative[0], explanation.narrative[0]
+    # The explain API is still addressed by the raw key, so a caller never has
+    # to parse a display string back into an index.
+    assert explanation.decision == solution.decisions[0].key
+
+
+def test_labels_are_optional_and_absent_where_no_set_declares_them():
+    """Models without labels must be unaffected, and must not pay for the
+    feature by carrying a copy of every key."""
+    template = get("assignment")
+    spec = template.build(template.example())
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    solution = build_solution(compiled, result)
+
+    assert all(not s.labels for s in compiled.ir.sets)
+    assert all(d.label is None for d in solution.decisions)
+    assert all(c.label is None for c in solution.binding_constraints)
+
+
+def test_a_partial_label_map_falls_back_per_element():
+    """Labelling some elements and not others must not produce a broken key."""
+    from psp.provenance.labels import LabelResolver
+
+    template = get("lecture_timetabling")
+    spec = template.build(template.example())
+    spec.sets = [
+        s.model_copy(update={"labels": {"0": "Sun 08:30"}}) if s.name == "Slots" else s
+        for s in spec.sets
+    ]
+    compiled = compile_and_flatten(spec)
+    labels = LabelResolver(compiled.ir)
+
+    assert labels.variable("place", ["db_y2", "hall_a", "0"]) == "place[db_y2, hall_a, Sun 08:30]"
+    # An unlabelled element renders as itself rather than blank or missing.
+    assert labels.variable("place", ["db_y2", "hall_a", "7"]) == "place[db_y2, hall_a, 7]"
