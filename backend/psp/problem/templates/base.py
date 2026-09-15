@@ -74,23 +74,32 @@ class ProblemTemplate:
         description: str | None = None,
         default: float | None = None,
         origin: str = "user_input",
+        origins: dict[str, SourceRef | str] | None = None,
     ) -> ProblemParameter:
         """Build a parameter from ``{"a|b": 3.0}`` or ``[{"index": [...], "value": x}]``.
 
         Every value is stamped with an origin, because a parameter with no
-        recorded source cannot appear in an explanation later.
+        recorded source cannot appear in an explanation later. ``origins`` gives
+        individual cells a source of their own, keyed the same way as ``rows``:
+        a slot blocked by a named exam should say so, rather than being
+        indistinguishable from one the user simply typed in.
         """
         values: list[ParameterValue] = []
         if isinstance(rows, dict):
-            items = [(k.split("|") if k else [], v) for k, v in rows.items()]
+            items = [(k, k.split("|") if k else [], v) for k, v in rows.items()]
         else:
-            items = [(r["index"], r["value"]) for r in rows]
-        for index, value in items:
+            items = [("|".join(str(x) for x in r["index"]), r["index"], r["value"])
+                     for r in rows]
+        for key, index, value in items:
+            specific = (origins or {}).get(key)
             values.append(
                 ParameterValue(
                     index=[str(x) for x in index],
                     value=float(value),
-                    origin=SourceRef(source=origin),
+                    origin=(
+                        specific if isinstance(specific, SourceRef)
+                        else SourceRef(source=specific or origin)
+                    ),
                 )
             )
         return ProblemParameter(

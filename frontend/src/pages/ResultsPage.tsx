@@ -215,6 +215,50 @@ export default function ResultsPage({
             </>
           )}
 
+          {explanation.ruled_out.length > 0 && (
+            <>
+              <h3 style={{ marginTop: "1rem" }}>What removed the alternatives</h3>
+              <p className="muted fxs" style={{ marginTop: "-0.3rem", marginBottom: "0.5rem" }}>
+                A rule that forbids something never mentions what was chosen, so these are the
+                rows that closed off the other options.
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rule</th>
+                    <th className="num">Options removed</th>
+                    <th>Because of</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {explanation.ruled_out.slice(0, 8).map((e) => {
+                    const named = [
+                      ...new Set(
+                        e.parameters.flatMap((p) =>
+                          p.sources.filter((s) => s !== "user_input"),
+                        ),
+                      ),
+                    ];
+                    return (
+                      <tr key={e.key}>
+                        <td>
+                          <div className="mono" title={e.key}>{e.label ?? e.key}</div>
+                          <div className="muted">{e.statement}</div>
+                        </td>
+                        <td className="num">{num(e.alternatives_removed ?? 0, 0)}</td>
+                        <td className="muted">
+                          {named.length > 0
+                            ? named.map((s) => s.replace("fixed_event:", "")).join(", ")
+                            : "the data as entered"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
+          )}
+
           {explanation.assumptions.length > 0 && (
             <>
               <h3 style={{ marginTop: "1rem" }}>This rests on</h3>

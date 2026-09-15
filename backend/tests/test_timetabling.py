@@ -126,6 +126,23 @@ def test_example_timetable_satisfies_every_stated_rule():
         for g in busy(offering):
             assert (g, at) not in blocked_groups
 
+    # Nothing is taught during a fixed event, for anyone it stops.
+    for event in data.get("fixed_events") or []:
+        event_days = event.get("days") or [event["day"]]
+        periods = event.get("slots")
+        periods = range(per_day) if periods is None else periods
+        blocked = {slot(day, index) for day in event_days for index in periods}
+        wide = not any(event.get(k) for k in ("groups", "rooms", "lecturers"))
+        for offering, room, at in running:
+            if at not in blocked:
+                continue
+            assert wide is False, f"{offering} runs during faculty-wide {event['key']}"
+            assert room not in (event.get("rooms") or []), f"{room} used during {event['key']}"
+            assert offerings[offering]["lecturer"] not in (event.get("lecturers") or [])
+            assert not busy(offering) & set(event.get("groups") or []), (
+                f"{offering} runs during {event['key']}"
+            )
+
     # Nobody is asked to cross campus faster than the walk allows. Checked for
     # student groups and lecturers alike, straight from the travel table.
     travel = {}
@@ -203,6 +220,7 @@ def test_a_subgroup_lab_cannot_clash_with_its_cohorts_lecture():
     data["lecturer_unavailable"] = []
     data["room_unavailable"] = []
     data["group_unavailable"] = []
+    data["fixed_events"] = []
     data["avoid_slots"] = []
     data["preferred_room"] = []
     data["travel_slots"] = []  # isolate the hierarchy rule from the travel rule
@@ -232,6 +250,7 @@ def test_two_subgroups_of_one_cohort_may_sit_labs_at_the_same_time():
     data["lecturer_unavailable"] = []
     data["room_unavailable"] = []
     data["group_unavailable"] = []
+    data["fixed_events"] = []
     data["avoid_slots"] = []
     data["preferred_room"] = []
     data["travel_slots"] = []
@@ -403,6 +422,7 @@ def test_travel_time_forbids_a_walk_that_does_not_fit():
     data["lecturer_unavailable"] = []
     data["room_unavailable"] = []
     data["group_unavailable"] = []
+    data["fixed_events"] = []
     data["avoid_slots"] = []
     data["preferred_room"] = []
     data["max_consecutive_per_group"] = 2
@@ -447,6 +467,7 @@ def test_travel_applies_to_lecturers_not_only_students():
     data["lecturer_unavailable"] = []
     data["room_unavailable"] = []
     data["group_unavailable"] = []
+    data["fixed_events"] = []
     data["avoid_slots"] = []
     data["preferred_room"] = []
     data["rooms"] = {
@@ -536,6 +557,7 @@ def test_a_multi_period_session_may_not_run_through_a_closure():
         data["slot_labels"] = ["09:00", "11:00", "13:00"]
         data["lecturer_unavailable"] = []
         data["group_unavailable"] = []
+        data["fixed_events"] = []
         data["avoid_slots"] = []
         data["preferred_room"] = []
         data["travel_slots"] = []
@@ -568,6 +590,7 @@ def test_a_lecturer_may_not_be_scheduled_through_their_unavailability():
     data["slot_labels"] = ["09:00", "11:00", "13:00"]
     data["room_unavailable"] = []
     data["group_unavailable"] = []
+    data["fixed_events"] = []
     data["avoid_slots"] = []
     data["preferred_room"] = []
     data["travel_slots"] = []
@@ -584,3 +607,211 @@ def test_a_lecturer_may_not_be_scheduled_through_their_unavailability():
     data["group_unavailable"] = [{"group": "cs_y2_a", "day": "Mon", "slot": 1}]
     _, _, result, _, _ = solve(data)
     assert result.status == SolveStatus.INFEASIBLE
+
+
+def test_a_faculty_wide_event_stops_everything():
+    """An event naming no group, room or lecturer is a public holiday. Reading
+    that as "stops nobody" would be the dangerous default."""
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["fixed_events"] = [
+        {"key": "national_day", "name": "National day", "kind": "holiday", "day": "Wed"},
+    ]
+    _, compiled, result, solution, _ = solve(data)
+    assert result.status == SolveStatus.OPTIMAL
+
+    per_day = data["slots_per_day"]
+    wednesday = range(data["days"].index("Wed") * per_day,
+                      (data["days"].index("Wed") + 1) * per_day)
+    for offering, _, at in occupancy(placements(solution, data), data):
+        assert at not in wednesday, f"{offering} scheduled on the holiday"
+
+    # Every kind of availability was closed, not just the students'.
+    for name in ("group_available", "room_available", "lecturer_available"):
+        table = compiled.ir.param(name)
+        assert any(
+            table.get((subject, str(at))) == 0.0
+            for at in wednesday
+            for subject in compiled.ir.set(table.index_sets[0]).elements
+        ), name
+
+
+def test_a_scoped_event_stops_only_what_it_names():
+    """An exam takes its cohorts, its hall and its invigilator out; everyone
+    else carries on."""
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["fixed_events"] = [
+        {"key": "y2_exam", "name": "Year 2 exam", "kind": "exam", "day": "Wed", "slots": [0, 1],
+         "groups": ["cs_y2_a", "cs_y2_b"], "rooms": ["hall_a"], "lecturers": ["haddad"]},
+    ]
+    _, compiled, result, solution, _ = solve(data)
+    assert result.status == SolveStatus.OPTIMAL
+
+    per_day = data["slots_per_day"]
+    exam_slots = {data["days"].index("Wed") * per_day + i for i in (0, 1)}
+    busy, _ = group_closure(data)
+    for offering, room, at in occupancy(placements(solution, data), data):
+        if at not in exam_slots:
+            continue
+        assert not busy(offering) & {"cs_y2_a", "cs_y2_b", "cs_y2_a1", "cs_y2_a2",
+                                     "cs_y2_b1", "cs_y2_b2"}
+        assert room != "hall_a"
+        assert data["offerings"][offering]["lecturer"] != "haddad"
+
+    # Year 3 is untouched by the exam. Checked on its second period, since the
+    # example already blocks year 3 for a project seminar in the first.
+    second = max(exam_slots)
+    assert compiled.ir.param("group_available").get(("cs_y3_a", str(second))) == 1.0
+    assert compiled.ir.param("room_available").get(("hall_b", str(second))) == 1.0
+
+
+def test_a_blocked_period_says_which_event_blocked_it():
+    """The point of declaring an event rather than typing out unavailability:
+    the block keeps its reason, so an explanation can name it."""
+    template = get("lecture_timetabling")
+    spec = template.build(template.example())
+
+    blocked = [
+        v for v in spec.parameter("group_available").values
+        if v.value == 0.0 and v.origin and v.origin.source.startswith("fixed_event:")
+    ]
+    assert blocked, "no group period was attributed to an event"
+    sources = {v.origin.source for v in blocked}
+    assert "fixed_event:spring_holiday" in sources
+    notes = {v.origin.note for v in blocked}
+    assert any(note and note.startswith("holiday:") for note in notes)
+
+    # A subgroup inherits both the block and the reason from its cohort.
+    exam_cells = [
+        v for v in spec.parameter("group_available").values
+        if v.origin and v.origin.source == "fixed_event:db_midterm"
+    ]
+    assert {v.index[0] for v in exam_cells} >= {"cs_y2_a", "cs_y2_a1", "cs_y2_a2"}
+
+    # Ordinary unavailability is still plain user input, not dressed up as an event.
+    typed = [
+        v for v in spec.parameter("lecturer_available").values
+        if v.value == 0.0 and v.origin and v.origin.source == "user_input"
+    ]
+    assert typed, "hand-entered unavailability lost its own origin"
+
+
+def test_omitting_the_periods_blocks_the_whole_day():
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["fixed_events"] = [
+        {"key": "closure", "name": "Campus closed", "kind": "holiday", "day": "Thu"},
+    ]
+    spec = template.build(data)
+    per_day = data["slots_per_day"]
+    thursday = [data["days"].index("Thu") * per_day + i for i in range(per_day)]
+    table = spec.parameter("room_available")
+    for at in thursday:
+        assert any(v.value == 0.0 and v.index == ["lab_1", str(at)] for v in table.values)
+
+
+def test_events_spanning_several_days_are_accepted():
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["fixed_events"] = [
+        {"key": "exam_week", "name": "Examination period", "kind": "exam",
+         "days": ["Wed", "Thu"], "slots": [3, 4]},
+    ]
+    spec = template.build(data)
+    event = next(e for e in spec.metadata["fixed_events"] if e["key"] == "exam_week")
+    assert event["days"] == ["Wed", "Thu"]
+    assert event["faculty_wide"] is True
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+
+
+def test_malformed_events_are_refused():
+    template = get("lecture_timetabling")
+
+    for event, message in (
+        ({"name": "no key", "day": "Mon"}, "needs a key"),
+        ({"key": "e1", "name": "no day"}, "which day"),
+        ({"key": "e2", "name": "bad day", "day": "Caturday"}, "not one of the teaching days"),
+        ({"key": "e3", "name": "bad slot", "day": "Mon", "slots": [99]}, "outside the"),
+        ({"key": "e4", "name": "bad group", "day": "Mon", "groups": ["nobody"]},
+         "unknown group"),
+        ({"key": "e5", "name": "bad room", "day": "Mon", "rooms": ["nowhere"]}, "unknown room"),
+        ({"key": "e6", "name": "bad staff", "day": "Mon", "lecturers": ["ghost"]},
+         "unknown lecturer"),
+    ):
+        data = template.example()
+        data["fixed_events"] = [event]
+        with pytest.raises(ValueError, match=message):
+            template.build(data)
+
+
+def test_an_explanation_names_the_event_that_removed_the_alternatives():
+    """A rule that forbids something never mentions the placement that was
+    chosen, so a fixed event could never appear in `limited_by`. Without
+    `ruled_out` the event provenance would be unreachable — which is the whole
+    reason to declare an event rather than type out unavailability."""
+    from psp.provenance import explain_decision
+
+    template = get("lecture_timetabling")
+    spec, compiled, result, solution, _ = solve(template.example())
+    assert result.status == SolveStatus.OPTIMAL
+
+    explanation = explain_decision(compiled, solution, solution.decisions[0].key)
+    assert explanation.ruled_out, "nothing was recorded as closing off the alternatives"
+
+    # No ruled-out row may mention the chosen placement: that is what makes it
+    # a rule about the alternatives rather than about this decision.
+    for evidence in explanation.ruled_out:
+        row = next(c for c in compiled.flat.constraints if c.key == evidence.key)
+        assert explanation.decision not in row.terms
+        assert evidence.alternatives_removed and evidence.alternatives_removed > 0
+
+    named = {
+        source
+        for evidence in explanation.ruled_out
+        for parameter in evidence.parameters
+        for source in parameter.sources
+    }
+    assert any(s.startswith("fixed_event:") for s in named), named
+    assert "fixed_event:spring_holiday" in named
+
+    joined = "\n".join(explanation.narrative)
+    assert "Other options for it were removed by" in joined
+    assert "fixed_event:" in joined
+
+
+def test_ruled_out_only_counts_the_same_subject():
+    """The count must be the options removed for *this* offering, not every
+    placement the rule forbids across the faculty."""
+    from psp.provenance import explain_decision
+
+    template = get("lecture_timetabling")
+    _, compiled, result, solution, _ = solve(template.example())
+    decision = solution.decisions[0]
+    explanation = explain_decision(compiled, solution, decision.key)
+    offering = decision.index[0]
+
+    for evidence in explanation.ruled_out:
+        row = next(c for c in compiled.flat.constraints if c.key == evidence.key)
+        mine = [
+            key for key in row.terms
+            if (v := compiled.flat.var_index.get(key)) and v.index[:1] == [offering]
+        ]
+        assert evidence.alternatives_removed == len(mine)
+        assert len(mine) <= len(row.terms)
+
+
+def test_models_without_forbidding_rules_have_nothing_ruled_out():
+    from psp.provenance import explain_decision
+
+    template = get("transportation")
+    data = template.example()
+    data.pop("lane_capacity")
+    spec = template.build(data)
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, solver="highs", options=OPTIONS)
+    solution = build_solution(compiled, result)
+    explanation = explain_decision(compiled, solution, solution.decisions[0].key)
+    assert explanation.ruled_out == []

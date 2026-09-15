@@ -164,23 +164,28 @@ export interface SolveResponse {
   solution: Solution;
 }
 
+export interface ConstraintEvidence {
+  key: string;
+  label: string | null;
+  statement: string | null;
+  category: string | null;
+  rationale: string | null;
+  coefficient: number | null;
+  /** How many other options for the same subject this rule removed. */
+  alternatives_removed: number | null;
+  marginal_effect: number | null;
+  marginal_objective: string | null;
+  parameters: Array<{ parameter: string; description: string | null; sources: string[] }>;
+}
+
 export interface Explanation {
   decision: string;
   label: string | null;
   value: number;
   meaning: string | null;
   objective_contribution: Record<string, number>;
-  limited_by: Array<{
-    key: string;
-    label: string | null;
-    statement: string | null;
-    category: string | null;
-    rationale: string | null;
-    coefficient: number;
-    marginal_effect: number | null;
-    marginal_objective: string | null;
-    parameters: Array<{ parameter: string; description: string | null; sources: string[] }>;
-  }>;
+  limited_by: ConstraintEvidence[];
+  ruled_out: ConstraintEvidence[];
   assumptions: Array<{ key: string; statement: string; rationale: string | null }>;
   scenario: string | null;
   narrative: string[];

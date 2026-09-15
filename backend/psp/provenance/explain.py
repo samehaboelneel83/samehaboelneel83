@@ -31,7 +31,10 @@ class ConstraintEvidence(BaseModel):
     statement: str | None = None
     category: str | None = None
     rationale: str | None = None
-    coefficient: float
+    coefficient: float | None = None
+    alternatives_removed: int | None = None
+    """How many other placements of the same subject this row forbids. Set only
+    on ``ruled_out`` evidence, where the row never touches the chosen one."""
     binding: bool
     slack: float
     shadow_price: float | None = None
@@ -48,6 +51,13 @@ class Explanation(BaseModel):
     objective_contribution: dict[str, float] = Field(default_factory=dict)
     limited_by: list[ConstraintEvidence] = Field(default_factory=list)
     also_appears_in: list[ConstraintEvidence] = Field(default_factory=list)
+    ruled_out: list[ConstraintEvidence] = Field(default_factory=list)
+    """Why the alternatives went away.
+
+    A rule that forbids something never mentions what was chosen, so it can
+    never appear in ``limited_by`` — yet "the lecture is not on Sunday because
+    of the spring holiday" is usually the question being asked. These are the
+    rows that zero out other placements of the same subject."""
     assumptions: list[dict] = Field(default_factory=list)
     scenario: str | None = None
     narrative: list[str] = Field(default_factory=list)
@@ -104,6 +114,45 @@ def explain_decision(
         )
         (limited_by if evidence.binding else others).append(evidence)
 
+    # Rules that forbid alternatives: rows fixed at zero which never touch the
+    # chosen placement but remove others of the same subject. The subject is
+    # taken as the first index — the offering, the activity, the vehicle — which
+    # is the convention every template here follows.
+    ruled_out: list[ConstraintEvidence] = []
+    if var.index:
+        subject = var.index[0]
+        for row in flat.constraints:
+            if row.op != "eq" or abs(row.rhs) > 1e-9 or variable_key in row.terms:
+                continue
+            removed = sum(
+                1
+                for key in row.terms
+                if (sibling := flat.var_index.get(key)) is not None
+                and sibling.name == var.name
+                and sibling.index[:1] == [subject]
+            )
+            if not removed:
+                continue
+            spec_constraint = constraints_by_name.get(row.name)
+            ruled_out.append(
+                ConstraintEvidence(
+                    key=row.key,
+                    name=row.name,
+                    label=labels.constraint(row.name, row.index),
+                    statement=row.statement,
+                    category=spec_constraint.category if spec_constraint else None,
+                    rationale=spec_constraint.rationale if spec_constraint else None,
+                    alternatives_removed=removed,
+                    binding=True,
+                    slack=0.0,
+                    parameters=[
+                        _parameter_evidence(parameters_by_name.get(name), name)
+                        for name in sorted(constraint_parameters(spec_constraint))
+                    ] if spec_constraint else [],
+                )
+            )
+        ruled_out.sort(key=lambda e: -(e.alternatives_removed or 0))
+
     contribution = {}
     for component in flat.objective.components:
         coefficient = component["terms"].get(variable_key)
@@ -118,6 +167,7 @@ def explain_decision(
         objective_contribution=contribution,
         limited_by=sorted(limited_by, key=lambda e: -abs(e.marginal_effect or 0.0)),
         also_appears_in=sorted(others, key=lambda e: e.slack),
+        ruled_out=ruled_out,
         assumptions=compiled.record.assumptions,
         scenario=compiled.record.scenario_key,
     )
@@ -181,4 +231,20 @@ def _narrate(explanation: Explanation, variable_name: str) -> list[str]:
             "No constraint involving it is binding; its value is driven by the "
             "objective and its own bounds."
         )
+
+    if explanation.ruled_out:
+        lines.append("Other options for it were removed by:")
+        for evidence in explanation.ruled_out[:4]:
+            lines.append(
+                f"  - {evidence.statement or evidence.name} "
+                f"({evidence.alternatives_removed} option(s) removed)"
+            )
+            attributed = sorted({
+                source
+                for parameter in evidence.parameters
+                for source in parameter.sources
+                if source != "user_input"
+            })
+            if attributed:
+                lines.append(f"    including {', '.join(attributed)}")
     return lines

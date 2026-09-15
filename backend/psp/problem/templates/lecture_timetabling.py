@@ -37,6 +37,18 @@ session in another, for the same people. Zero — the default, and the same
 building always — means back-to-back is fine. It applies to lecturers as well
 as to student groups: a lecturer cannot teleport either.
 
+Fixed events
+------------
+Exams, holidays, ceremonies and maintenance are not taught, but they take the
+week apart. ``fixed_events`` declares one once — a day, optionally some periods,
+and who it stops — and it is expanded into the availability of everyone it
+touches. Naming no group, room or lecturer means it stops the whole faculty,
+which is what a public holiday does.
+
+Each blocked period keeps the event as its source, so an explanation can say a
+session sits where it does because of the *mid-term exam*, rather than reporting
+an unattributed gap.
+
 Hard and soft
 -------------
 Conflicts, capacity, room suitability, availability and load limits are hard:
@@ -58,6 +70,7 @@ from psp.problem.spec import (
     ProblemVariable,
     Scenario,
     ScenarioOverride,
+    SourceRef,
 )
 from psp.problem.templates.base import ProblemTemplate, TemplateInput
 
@@ -113,6 +126,15 @@ class LectureTimetablingTemplate(ProblemTemplate):
                           required=False,
                           description="Slots a group cannot attend — fixed events, holidays.",
                           columns=["group", "day", "slot"]),
+            TemplateInput(key="fixed_events", label="Fixed events", kind="table",
+                          required=False,
+                          description=(
+                              "Exams, holidays, ceremonies and maintenance. Give a day and "
+                              "optionally some periods; name the groups, rooms or lecturers "
+                              "it stops, or none of them to stop the whole faculty."
+                          ),
+                          columns=["key", "name", "kind", "day", "slots",
+                                   "groups", "rooms", "lecturers"]),
             TemplateInput(key="travel_slots", label="Travel between buildings", kind="table",
                           required=False,
                           description=(
@@ -215,6 +237,22 @@ class LectureTimetablingTemplate(ProblemTemplate):
             ],
             "group_unavailable": [
                 {"group": g, "day": "Wed", "slot": 0} for g in ("cs_y3_a", "se_y3_a")
+            ],
+            # Four shapes of fixed event: one stopping the whole faculty, one
+            # stopping only the cohorts sitting it (with its hall and
+            # invigilator), one stopping everyone for a single period, and one
+            # taking a single room out of service.
+            "fixed_events": [
+                {"key": "spring_holiday", "name": "Spring holiday", "kind": "holiday",
+                 "day": "Sun"},
+                {"key": "db_midterm", "name": "Database Systems mid-term", "kind": "exam",
+                 "day": "Tue", "slots": [2, 3],
+                 "groups": ["cs_y2_a", "cs_y2_b"], "rooms": ["hall_a"],
+                 "lecturers": ["haddad"]},
+                {"key": "faculty_assembly", "name": "Faculty assembly", "kind": "ceremony",
+                 "day": "Mon", "slots": [4]},
+                {"key": "lab_1_service", "name": "Lab 1 servicing", "kind": "maintenance",
+                 "day": "Thu", "slots": [0, 1], "rooms": ["lab_1"]},
             ],
             # The annex is a ten-minute walk from the main building, which is
             # longer than the changeover between periods.
@@ -397,13 +435,73 @@ class LectureTimetablingTemplate(ProblemTemplate):
             data.get("lecturer_unavailable"), "lecturer", lecturers)
         room_available = availability(data.get("room_unavailable"), "room", room_keys)
         group_available = availability(data.get("group_unavailable"), "group", group_keys)
+
+        tables = {
+            "lecturer": (lecturer_available, lecturers),
+            "room": (room_available, room_keys),
+            "group": (group_available, group_keys),
+        }
+        # Which event closed each cell, so the block can be attributed later.
+        blocked_by: dict[str, dict[str, SourceRef]] = {k: {} for k in tables}
+        events: list[dict] = []
+
+        for raw in data.get("fixed_events") or []:
+            key = str(raw.get("key") or "")
+            name = str(raw.get("name") or key)
+            if not key:
+                raise ValueError("every fixed event needs a key")
+            event_days = raw.get("days") or ([raw["day"]] if raw.get("day") else None)
+            if not event_days:
+                raise ValueError(f"fixed event '{key}' does not say which day it falls on")
+            # No periods named means the whole day, which is what a holiday is.
+            periods = raw.get("slots")
+            periods = list(range(slots_per_day)) if periods is None else [int(x) for x in periods]
+
+            named = {
+                "lecturer": raw.get("lecturers"),
+                "room": raw.get("rooms"),
+                "group": raw.get("groups"),
+            }
+            # Naming nobody stops everyone: that is a public holiday, not a
+            # no-op, and reading it as a no-op would be the dangerous default.
+            faculty_wide = all(v is None for v in named.values())
+            if faculty_wide:
+                named = {kind: list(subjects) for kind, (_, subjects) in tables.items()}
+
+            source = SourceRef(
+                source=f"fixed_event:{key}",
+                note=f"{raw.get('kind', 'event')}: {name}",
+            )
+            touched = 0
+            for kind, subjects in named.items():
+                table, known = tables[kind]
+                for subject in subjects or []:
+                    if str(subject) not in known:
+                        raise ValueError(
+                            f"fixed event '{key}' names unknown {kind} '{subject}'"
+                        )
+                    for day in event_days:
+                        for period in periods:
+                            cell = f"{subject}|{slot_index(day, period)}"
+                            table[cell] = 0.0
+                            blocked_by[kind][cell] = source
+                            touched += 1
+            events.append({
+                "key": key, "name": name, "kind": raw.get("kind", "event"),
+                "days": event_days, "slots": periods,
+                "faculty_wide": faculty_wide, "blocked_cells": touched,
+            })
+
         # A cohort that is blocked blocks its subgroups too, so the leaf-level
-        # check below sees the whole picture.
+        # check below sees the whole picture — and the reason travels with it.
         for g in group_keys:
             for a in ancestors(g):
                 for t in range(total_slots):
                     if group_available[f"{a}|{t}"] == 0.0:
                         group_available[f"{g}|{t}"] = 0.0
+                        inherited = blocked_by["group"].get(f"{a}|{t}")
+                        if inherited is not None:
+                            blocked_by["group"].setdefault(f"{g}|{t}", inherited)
 
         time_penalty = {}
         for row in data.get("avoid_slots") or []:
@@ -447,11 +545,14 @@ class LectureTimetablingTemplate(ProblemTemplate):
             self.indexed("room_type_ok", ["Offerings", "Rooms"], room_type_ok, default=0.0,
                          description="1 when the room is of the type the course needs"),
             self.indexed("lecturer_available", ["Lecturers", "Slots"], lecturer_available,
-                         default=1.0, description="1 when the lecturer can teach at that slot"),
+                         default=1.0, description="1 when the lecturer can teach at that slot",
+                         origins=blocked_by["lecturer"]),
             self.indexed("room_available", ["Rooms", "Slots"], room_available, default=1.0,
-                         description="1 when the room is open at that slot"),
+                         description="1 when the room is open at that slot",
+                         origins=blocked_by["room"]),
             self.indexed("group_available", ["Groups", "Slots"], group_available, default=1.0,
-                         description="1 when the group is free at that slot"),
+                         description="1 when the group is free at that slot",
+                         origins=blocked_by["group"]),
             self.indexed("day_of", ["Slots"],
                          {str(t): float(t // slots_per_day) for t in range(total_slots)},
                          description="Which day a slot falls in"),
@@ -907,6 +1008,15 @@ class LectureTimetablingTemplate(ProblemTemplate):
                     affects=["max_consecutive_lectures"],
                 ),
                 Assumption(
+                    key="fixed_events_are_absolute",
+                    statement="A fixed event blocks its periods outright; teaching is moved "
+                              "around it, never through it.",
+                    rationale="An event naming no group, room or lecturer stops the whole "
+                              "faculty. Nothing here reschedules the event itself.",
+                    affects=["group_availability", "room_availability",
+                             "lecturer_availability"],
+                ),
+                Assumption(
                     key="preferences_are_soft",
                     statement="Preferred times and rooms are priced, not enforced.",
                     rationale="Encoding a preference as a hard constraint is the usual cause "
@@ -951,6 +1061,7 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 ),
             ],
             metadata={
+                "fixed_events": events,
                 "days": days,
                 "slot_labels": slot_labels,
                 "slots_per_day": slots_per_day,
