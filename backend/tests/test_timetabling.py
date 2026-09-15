@@ -126,6 +126,33 @@ def test_example_timetable_satisfies_every_stated_rule():
         for g in busy(offering):
             assert (g, at) not in blocked_groups
 
+    # Nobody is asked to cross campus faster than the walk allows. Checked for
+    # student groups and lecturers alike, straight from the travel table.
+    travel = {}
+    for row in data.get("travel_slots") or []:
+        travel[(row["from"], row["to"])] = row["slots"]
+        travel[(row["to"], row["from"])] = row["slots"]
+
+    def building(room):
+        return rooms[room]["building"]
+
+    for first in running:
+        for second in running:
+            gap = second[2] - first[2]
+            if gap <= 0 or first[2] // per_day != second[2] // per_day:
+                continue
+            needed = travel.get((building(first[1]), building(second[1])), 0)
+            if gap > needed:
+                continue
+            shared_group = busy(first[0]) & busy(second[0]) & set(leaves)
+            same_lecturer = (
+                offerings[first[0]]["lecturer"] == offerings[second[0]]["lecturer"]
+            )
+            assert not shared_group and not same_lecturer, (
+                f"{first[0]} in {building(first[1])} at {first[2]} then {second[0]} in "
+                f"{building(second[1])} at {second[2]}: {gap} period(s) apart, needs {needed}"
+            )
+
     # Daily load and consecutive runs, judged per leaf group.
     max_daily = data["max_daily_per_group"]
     max_consecutive = data["max_consecutive_per_group"]
@@ -178,6 +205,7 @@ def test_a_subgroup_lab_cannot_clash_with_its_cohorts_lecture():
     data["group_unavailable"] = []
     data["avoid_slots"] = []
     data["preferred_room"] = []
+    data["travel_slots"] = []  # isolate the hierarchy rule from the travel rule
     data["offerings"] = {
         "lecture": {"course": "db_systems", "lecturer": "haddad",
                     "groups": ["cs_y2_a"], "sessions_per_week": 1, "duration": 1},
@@ -206,6 +234,7 @@ def test_two_subgroups_of_one_cohort_may_sit_labs_at_the_same_time():
     data["group_unavailable"] = []
     data["avoid_slots"] = []
     data["preferred_room"] = []
+    data["travel_slots"] = []
     data["offerings"] = {
         "lab_a1": {"course": "db_lab", "lecturer": "haddad",
                    "groups": ["cs_y2_a1"], "sessions_per_week": 1, "duration": 1},
@@ -360,3 +389,198 @@ def test_a_partial_label_map_falls_back_per_element():
     assert labels.variable("place", ["db_y2", "hall_a", "0"]) == "place[db_y2, hall_a, Sun 08:30]"
     # An unlabelled element renders as itself rather than blank or missing.
     assert labels.variable("place", ["db_y2", "hall_a", "7"]) == "place[db_y2, hall_a, 7]"
+
+
+def test_travel_time_forbids_a_walk_that_does_not_fit():
+    """Two sessions the same people must attend, back to back in buildings a
+    period apart, cannot both happen. Without the travel rule the solver would
+    happily schedule them."""
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["days"] = ["Mon"]
+    data["slots_per_day"] = 2
+    data["slot_labels"] = ["09:00", "11:00"]
+    data["lecturer_unavailable"] = []
+    data["room_unavailable"] = []
+    data["group_unavailable"] = []
+    data["avoid_slots"] = []
+    data["preferred_room"] = []
+    data["max_consecutive_per_group"] = 2
+    # One hall in the main building, one lab in the annex, nothing else.
+    data["rooms"] = {
+        "hall_a": {"capacity": 120, "type": "lecture_hall", "building": "main"},
+        "lab_1": {"capacity": 30, "type": "computer_lab", "building": "annex"},
+    }
+    # One cohort with a lecture and a lab: two sessions, two slots, no choice
+    # but to place them back to back.
+    data["offerings"] = {
+        "lecture": {"course": "db_systems", "lecturer": "haddad",
+                    "groups": ["cs_y2_a1"], "sessions_per_week": 1, "duration": 1},
+        "lab": {"course": "db_lab", "lecturer": "haddad",
+                "groups": ["cs_y2_a1"], "sessions_per_week": 1, "duration": 1},
+    }
+
+    data["travel_slots"] = []
+    _, _, result, _, _ = solve(data)
+    assert result.status == SolveStatus.OPTIMAL, "the instance must be solvable without travel"
+
+    data["travel_slots"] = [{"from": "main", "to": "annex", "slots": 1}]
+    _, _, result, _, _ = solve(data)
+    assert result.status == SolveStatus.INFEASIBLE
+
+    # Three slots leave a free period between them, so the walk fits.
+    data["slots_per_day"] = 3
+    data["slot_labels"] = ["09:00", "11:00", "13:00"]
+    _, _, result, solution, _ = solve(data)
+    assert result.status == SolveStatus.OPTIMAL
+    starts = sorted(int(d.index[2]) for d in solution.decisions)
+    assert starts[1] - starts[0] >= 2, starts
+
+
+def test_travel_applies_to_lecturers_not_only_students():
+    """A lecturer walks at the same speed as a student."""
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["days"] = ["Mon"]
+    data["slots_per_day"] = 2
+    data["slot_labels"] = ["09:00", "11:00"]
+    data["lecturer_unavailable"] = []
+    data["room_unavailable"] = []
+    data["group_unavailable"] = []
+    data["avoid_slots"] = []
+    data["preferred_room"] = []
+    data["rooms"] = {
+        "hall_a": {"capacity": 120, "type": "lecture_hall", "building": "main"},
+        "lab_1": {"capacity": 30, "type": "computer_lab", "building": "annex"},
+    }
+    data["travel_slots"] = [{"from": "main", "to": "annex", "slots": 1}]
+    # Different cohorts, so no student is asked to cross — only the lecturer is.
+    data["offerings"] = {
+        "lecture": {"course": "db_systems", "lecturer": "haddad",
+                    "groups": ["cs_y2_a1"], "sessions_per_week": 1, "duration": 1},
+        "lab": {"course": "db_lab", "lecturer": "haddad",
+                "groups": ["cs_y2_b1"], "sessions_per_week": 1, "duration": 1},
+    }
+    _, _, result, _, _ = solve(data)
+    assert result.status == SolveStatus.INFEASIBLE
+
+    # Hand the lab to someone else and both fit in the same two periods.
+    data["offerings"]["lab"]["lecturer"] = "nasser"
+    _, _, result, _, _ = solve(data)
+    assert result.status == SolveStatus.OPTIMAL
+
+
+def test_travel_costs_nothing_when_the_campus_is_walkable():
+    """With no travel declared the rule is left out entirely rather than
+    generated and trivially satisfied."""
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["travel_slots"] = []
+    compiled = compile_and_flatten(template.build(data))
+    names = {c.name for c in compiled.flat.constraints}
+    assert "group_travel_time" not in names
+    assert "lecturer_travel_time" not in names
+    assert not any(s.name == "Gaps" for s in compiled.ir.sets)
+
+    with_travel = compile_and_flatten(template.build(template.example()))
+    assert "group_travel_time" in {c.name for c in with_travel.flat.constraints}
+
+
+def test_travel_longer_than_a_day_means_one_building_per_day():
+    """A walk longer than the teaching day is a strong statement, not an error:
+    the same people cannot use both buildings that day."""
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["travel_slots"] = [{"from": "main", "to": "annex", "slots": 99}]
+    compiled = compile_and_flatten(template.build(data))
+
+    # Capped at the widest gap that can still fall inside one day.
+    gaps = next(s for s in compiled.ir.sets if s.name == "Gaps")
+    assert gaps.elements == ["1", "2", "3", "4"]
+
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    if result.status == SolveStatus.OPTIMAL:
+        solution = build_solution(compiled, result)
+        rooms = data["rooms"]
+        busy, leaves = group_closure(data)
+        per_day = defaultdict(lambda: defaultdict(set))
+        for d in solution.decisions:
+            offering, room, at = d.index[0], d.index[1], int(d.index[2])
+            for g in busy(offering):
+                if g in leaves:
+                    per_day[(g, at // data["slots_per_day"])][g].add(rooms[room]["building"])
+        for (g, day), found in per_day.items():
+            assert len(found[g]) == 1, f"{g} uses {found[g]} on day {day}"
+
+    negative = template.example()
+    negative["travel_slots"] = [{"from": "main", "to": "annex", "slots": -1}]
+    with pytest.raises(ValueError, match="cannot be negative"):
+        template.build(negative)
+
+    unknown = template.example()
+    unknown["travel_slots"] = [{"from": "main", "to": "nowhere", "slots": 1}]
+    with pytest.raises(ValueError, match="unknown building"):
+        template.build(unknown)
+
+
+def test_a_multi_period_session_may_not_run_through_a_closure():
+    """Regression: availability was checked only at the slot a session starts
+    in, so a two-period lab could begin while the room was open and run
+    straight through the hour it shut."""
+    template = get("lecture_timetabling")
+
+    def instance(closed_slot):
+        data = template.example()
+        data["days"] = ["Mon"]
+        data["slots_per_day"] = 3
+        data["slot_labels"] = ["09:00", "11:00", "13:00"]
+        data["lecturer_unavailable"] = []
+        data["group_unavailable"] = []
+        data["avoid_slots"] = []
+        data["preferred_room"] = []
+        data["travel_slots"] = []
+        data["rooms"] = {"lab_1": {"capacity": 30, "type": "computer_lab",
+                                   "building": "annex"}}
+        data["offerings"] = {
+            "lab": {"course": "db_lab", "lecturer": "haddad",
+                    "groups": ["cs_y2_a1"], "sessions_per_week": 1, "duration": 2},
+        }
+        data["room_unavailable"] = [{"room": "lab_1", "day": "Mon", "slot": closed_slot}]
+        return data
+
+    # Shut for the last period: the session must take the first two, since
+    # starting second would run into the closure.
+    _, _, result, solution, _ = solve(instance(2))
+    assert result.status == SolveStatus.OPTIMAL
+    assert [int(d.index[2]) for d in solution.decisions] == [0]
+
+    # Shut for the middle period: no two consecutive open periods remain.
+    _, _, result, _, _ = solve(instance(1))
+    assert result.status == SolveStatus.INFEASIBLE
+
+
+def test_a_lecturer_may_not_be_scheduled_through_their_unavailability():
+    """The same defect, for the lecturer and group tables rather than the room."""
+    template = get("lecture_timetabling")
+    data = template.example()
+    data["days"] = ["Mon"]
+    data["slots_per_day"] = 3
+    data["slot_labels"] = ["09:00", "11:00", "13:00"]
+    data["room_unavailable"] = []
+    data["group_unavailable"] = []
+    data["avoid_slots"] = []
+    data["preferred_room"] = []
+    data["travel_slots"] = []
+    data["rooms"] = {"lab_1": {"capacity": 30, "type": "computer_lab", "building": "annex"}}
+    data["offerings"] = {
+        "lab": {"course": "db_lab", "lecturer": "haddad",
+                "groups": ["cs_y2_a1"], "sessions_per_week": 1, "duration": 2},
+    }
+    data["lecturer_unavailable"] = [{"lecturer": "haddad", "day": "Mon", "slot": 1}]
+    _, _, result, _, _ = solve(data)
+    assert result.status == SolveStatus.INFEASIBLE
+
+    data["lecturer_unavailable"] = []
+    data["group_unavailable"] = [{"group": "cs_y2_a", "day": "Mon", "slot": 1}]
+    _, _, result, _, _ = solve(data)
+    assert result.status == SolveStatus.INFEASIBLE

@@ -29,6 +29,14 @@ that, and conflating them is the classic timetabling bug:
   load are judged per **leaf** group, which is the finest unit an actual student
   belongs to.
 
+Travel between buildings
+------------------------
+A room sits in a building, and crossing campus takes time. ``travel_slots``
+says how many free periods must separate a session in one building from a
+session in another, for the same people. Zero — the default, and the same
+building always — means back-to-back is fine. It applies to lecturers as well
+as to student groups: a lecturer cannot teleport either.
+
 Hard and soft
 -------------
 Conflicts, capacity, room suitability, availability and load limits are hard:
@@ -105,6 +113,13 @@ class LectureTimetablingTemplate(ProblemTemplate):
                           required=False,
                           description="Slots a group cannot attend — fixed events, holidays.",
                           columns=["group", "day", "slot"]),
+            TemplateInput(key="travel_slots", label="Travel between buildings", kind="table",
+                          required=False,
+                          description=(
+                              "Free periods needed between sessions in two buildings. "
+                              "Applied both ways; omitted pairs need none."
+                          ),
+                          columns=["from", "to", "slots"]),
             TemplateInput(key="max_daily_per_group", label="Maximum lectures per day",
                           kind="number", required=False, default=4,
                           description="Most sessions any group may have in one day."),
@@ -201,6 +216,9 @@ class LectureTimetablingTemplate(ProblemTemplate):
             "group_unavailable": [
                 {"group": g, "day": "Wed", "slot": 0} for g in ("cs_y3_a", "se_y3_a")
             ],
+            # The annex is a ten-minute walk from the main building, which is
+            # longer than the changeover between periods.
+            "travel_slots": [{"from": "main", "to": "annex", "slots": 1}],
             "max_daily_per_group": 3,
             "max_consecutive_per_group": 2,
             # Nobody wants the last slot of the day.
@@ -260,6 +278,27 @@ class LectureTimetablingTemplate(ProblemTemplate):
                     f"offering '{key}' lasts {o['duration']} slots but a day has only "
                     f"{slots_per_day}; it can never be placed"
                 )
+
+        buildings = sorted({r["building"] for r in rooms.values()})
+        travel = {f"{b1}|{b2}": 0.0 for b1 in buildings for b2 in buildings}
+        for row in data.get("travel_slots") or []:
+            for a, b in ((row["from"], row["to"]), (row["to"], row["from"])):
+                if a not in buildings or b not in buildings:
+                    raise ValueError(
+                        f"travel time names unknown building '{a if a not in buildings else b}'"
+                    )
+                if a != b:
+                    # Symmetric by default: walking back takes as long as walking there.
+                    travel[f"{a}|{b}"] = float(row["slots"])
+        if any(v < 0 for v in travel.values()):
+            raise ValueError("travel time between buildings cannot be negative")
+        # Gaps wider than a day can never fall inside one, so the family is
+        # capped there. A travel time at or beyond the cap is still meaningful:
+        # it says the same people cannot use both buildings on the same day.
+        max_travel = min(
+            int(max(travel.values())) if travel else 0,
+            slots_per_day - 1,
+        )
 
         max_duration = max(int(o.get("duration", 1)) for o in offerings.values())
         max_daily = int(data.get("max_daily_per_group", 4))
@@ -425,6 +464,12 @@ class LectureTimetablingTemplate(ProblemTemplate):
                          description="Most sessions a group may have in one day"),
             self.indexed("max_consecutive", [], {"": float(max_consecutive)},
                          description="Longest permitted run of back-to-back slots"),
+            self.indexed("in_building", ["Rooms", "Buildings"],
+                         {f"{r}|{rooms[r]['building']}": 1.0 for r in room_keys}, default=0.0,
+                         description="1 when the room is in that building"),
+            self.indexed("travel", ["Buildings", "Buildings"], travel, default=0.0,
+                         description="Free periods needed to cross between two buildings",
+                         unit="slots"),
             self.indexed("time_penalty", ["Offerings", "Slots"], time_penalty, default=0.0,
                          description="Cost of placing an offering at a discouraged slot"),
             self.indexed("room_penalty", ["Offerings", "Rooms"], room_penalty, default=0.0,
@@ -434,6 +479,18 @@ class LectureTimetablingTemplate(ProblemTemplate):
         # ``in_use(t)`` is the sum of starts at t, t-1, ... t-duration+1. The
         # Offsets set keeps that a small local scan instead of a sweep over the
         # whole week for every conflict row.
+        def occupies(offset: str, start) -> tuple:
+            """Guards selecting the slots a session starting at ``start`` runs for.
+
+            Returned as a tuple so callers splat it into their own ``all_of``:
+            the range check has to be evaluated before the caller reads a table
+            at ``start + offset``, and ``all_of`` short-circuits in order.
+            """
+            return (
+                cmp("lt", i(offset), p("duration", i("o"))),
+                cmp("le", add(start, i(offset)), num(total_slots - 1)),
+            )
+
         def covers(offset: str, at) -> object:
             """Guard: offset k is inside the session length and t-k is a real slot."""
             return all_of(
@@ -500,29 +557,39 @@ class LectureTimetablingTemplate(ProblemTemplate):
             ),
             ProblemConstraint(
                 name="lecturer_availability",
-                statement="A lecturer is only scheduled at times they are available.",
+                statement="A lecturer is only scheduled at times they are available, for "
+                          "every period the session runs.",
                 category="policy",
+                rationale="A session that starts in an available period can still run on "
+                          "into an unavailable one.",
                 rel=eq(
                     total(
                         v("place", i("o"), i("r"), i("t")),
                         where=all_of(
                             cmp("eq", p("teaches", i("o"), i("l")), num(1)),
-                            cmp("eq", p("lecturer_available", i("l"), i("t")), num(0)),
+                            *occupies("k", i("t")),
+                            cmp("eq", p("lecturer_available", i("l"), add(i("t"), i("k"))),
+                                num(0)),
                         ),
-                        o="Offerings", r="Rooms", t="Slots", l="Lecturers",
+                        o="Offerings", r="Rooms", t="Slots", l="Lecturers", k="Offsets",
                     ),
                     num(0),
                 ),
             ),
             ProblemConstraint(
                 name="room_availability",
-                statement="A room is only used at times it is open.",
+                statement="A room is only used at times it is open, for every period the "
+                          "session runs.",
                 category="physical",
+                rationale="A two-period lab must not start before a closure and run through it.",
                 rel=eq(
                     total(
                         v("place", i("o"), i("r"), i("t")),
-                        where=cmp("eq", p("room_available", i("r"), i("t")), num(0)),
-                        o="Offerings", r="Rooms", t="Slots",
+                        where=all_of(
+                            *occupies("k", i("t")),
+                            cmp("eq", p("room_available", i("r"), add(i("t"), i("k"))), num(0)),
+                        ),
+                        o="Offerings", r="Rooms", t="Slots", k="Offsets",
                     ),
                     num(0),
                 ),
@@ -530,16 +597,17 @@ class LectureTimetablingTemplate(ProblemTemplate):
             ProblemConstraint(
                 name="group_availability",
                 statement="A group is not taught during its blocked periods — fixed events, "
-                          "seminars and holidays.",
+                          "seminars and holidays — for any period the session runs.",
                 category="policy",
                 rel=eq(
                     total(
                         v("place", i("o"), i("r"), i("t")),
                         where=all_of(
                             cmp("eq", p("busy", i("o"), i("g")), num(1)),
-                            cmp("eq", p("group_available", i("g"), i("t")), num(0)),
+                            *occupies("k", i("t")),
+                            cmp("eq", p("group_available", i("g"), add(i("t"), i("k"))), num(0)),
                         ),
-                        o="Offerings", r="Rooms", t="Slots", g="Groups",
+                        o="Offerings", r="Rooms", t="Slots", g="Groups", k="Offsets",
                     ),
                     num(0),
                 ),
@@ -642,6 +710,64 @@ class LectureTimetablingTemplate(ProblemTemplate):
             ),
         ]
 
+        # Crossing campus is only a constraint when it actually takes a period.
+        # With everything walkable the family adds nothing but rows, so it is
+        # left out entirely rather than generated and trivially satisfied.
+        if max_travel >= 1:
+            def elsewhere(who: str, relation: str, at, building: str):
+                """Sessions occupying ``who`` at ``at``, in ``building``."""
+                return total(
+                    v("place", i("o"), i("r"), sub(at, i("k"))),
+                    where=all_of(
+                        cmp("eq", p(relation, i("o"), i(who)), num(1)),
+                        cmp("eq", p("in_building", i("r"), i(building)), num(1)),
+                        covers("k", at),
+                    ),
+                    o="Offerings", r="Rooms", k="Offsets",
+                )
+
+            # The range guard must come before day_of[t + d] is read, or the
+            # lookup runs off the end of the week. `all_of` short-circuits, so
+            # ordering these is what keeps it safe.
+            def crossing(who: str) -> object:
+                return all_of(
+                    cmp("ge", p("travel", i("b1"), i("b2")), i("d")),
+                    cmp("le", add(i("t"), i("d")), num(total_slots - 1)),
+                    cmp("eq", p("day_of", i("t")), p("day_of", add(i("t"), i("d")))),
+                )
+
+            for who, relation, subject in (
+                ("g", "busy", "student group"),
+                ("l", "teaches", "lecturer"),
+            ):
+                guards = [crossing(who)]
+                if who == "g":
+                    guards.append(cmp("eq", p("is_leaf", i("g")), num(1)))
+                bindings = {who: "Groups" if who == "g" else "Lecturers"}
+                constraints.append(
+                    ProblemConstraint(
+                        name=f"{'group' if who == 'g' else 'lecturer'}_travel_time",
+                        statement=(
+                            f"A {subject} is given enough time to cross between buildings: "
+                            "no session in one building immediately after a session in "
+                            "another that is further away than the gap allows."
+                        ),
+                        category="physical",
+                        rationale="Two sessions closer together than the walk between their "
+                                  "buildings cannot both be attended.",
+                        forall=over(t="Slots", d="Gaps", b1="Buildings", b2="Buildings",
+                                    **bindings),
+                        where=all_of(*guards),
+                        rel=le(
+                            add(
+                                elsewhere(who, relation, i("t"), "b1"),
+                                elsewhere(who, relation, add(i("t"), i("d")), "b2"),
+                            ),
+                            num(1),
+                        ),
+                    )
+                )
+
         readable_slots = {
             str(d * slots_per_day + s): f"{days[d]} {slot_labels[s]}"
             for d in range(len(days))
@@ -675,6 +801,12 @@ class LectureTimetablingTemplate(ProblemTemplate):
                            description="Teaching staff"),
                 ProblemSet(name="Groups", elements=group_keys, entity_type="student_group",
                            description="Student groups that move together"),
+                ProblemSet(name="Buildings", elements=buildings, entity_type="building",
+                           description="Buildings the rooms sit in"),
+                *([ProblemSet(name="Gaps", kind="int",
+                              elements=[str(d) for d in range(1, max_travel + 1)],
+                              description="Period gaps a building change may need")]
+                  if max_travel >= 1 else []),
                 ProblemSet(name="Offsets", kind="int",
                            elements=[str(k) for k in range(max_duration)],
                            description="Positions within a session, for occupancy counting"),
@@ -748,11 +880,22 @@ class LectureTimetablingTemplate(ProblemTemplate):
                     affects=["Slots", "fits_within_day"],
                 ),
                 Assumption(
-                    key="no_travel_time",
-                    statement="Moving between buildings takes no time.",
-                    rationale="Back-to-back sessions in different buildings are treated as "
-                              "feasible; add a travel constraint if the campus is spread out.",
-                    affects=["group_no_overlap", "max_consecutive_lectures"],
+                    key="travel_is_between_buildings_only",
+                    statement=(
+                        "Travel time depends only on the pair of buildings, and is the same "
+                        "in both directions."
+                        if max_travel >= 1
+                        else "Every room is reachable from every other within the changeover "
+                             "between periods, so travel time is not modelled."
+                    ),
+                    rationale=(
+                        "Distances within a building, and the difference between walking up "
+                        "a hill and down it, are not distinguished."
+                        if max_travel >= 1
+                        else "Declare travel_slots if the campus is spread out."
+                    ),
+                    affects=(["group_travel_time", "lecturer_travel_time"]
+                             if max_travel >= 1 else ["group_no_overlap"]),
                 ),
                 Assumption(
                     key="break_from_consecutive_limit",
@@ -785,6 +928,16 @@ class LectureTimetablingTemplate(ProblemTemplate):
                     description="A stricter daily cap on every group.",
                     overrides=[ScenarioOverride(parameter="max_daily", index=[], value=2.0)],
                 ),
+                *([Scenario(
+                    key="distant_annex", name="Annex moved further away",
+                    description="Crossing to the annex costs a second free period.",
+                    overrides=[
+                        ScenarioOverride(parameter="travel", index=[b1, b2],
+                                         value=float(max_travel + 1))
+                        for b1 in buildings for b2 in buildings
+                        if travel[f"{b1}|{b2}"] >= 1
+                    ],
+                )] if max_travel >= 1 else []),
                 Scenario(
                     key="four_day_week", name="Thursday dropped",
                     description="No teaching on the last day of the week.",
