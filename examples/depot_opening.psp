@@ -1,0 +1,89 @@
+# Opening depots, and the rule that needs a constant.
+#
+# Two decisions of different kinds meet here: whether to open a depot at all,
+# and how much to ship from it. Most rules that join them stay linear on their
+# own — "ship nothing from a depot that is shut" is just
+# `ship <= capacity * open`.
+#
+# One does not. "A depot that opens is worth opening" — ship at least a minimum
+# — has to disappear entirely when the depot is shut, and a rule that switches
+# off is a rule with a constant in it: big enough that the shut case is no
+# restriction, small enough that the open case still bites. Choosing it badly
+# does not fail. Too small and the model quietly means something else; too large
+# and it solves slowly and rounds badly.
+#
+# So the constant is not written here, and it is not invented by the compiler
+# either. It is read off the bounds of the variables the rule is built from,
+# which is why `ship` is declared with a ceiling. Where the bounds do not prove
+# a value, the compiler refuses rather than choosing.
+#
+# The rule earns its place in this instance: without it the cheapest plan opens
+# the northern depot for thirty units, which is less than the depot is worth
+# running. The `ignore_minimums` scenario shows what that would have cost.
+
+problem depot_opening "Depot opening"
+  "Choose which depots to open and how much to ship from each, at least total "
+  "cost, where a depot that opens has to carry enough to be worth running."
+
+set Depots = north, south of depot
+set Customers = a, b, c of customer
+
+param demand[Customers] unit "units" = { a: 30, b: 25, c: 15 }
+param capacity[Depots] unit "units" = { north: 60, south: 60 }
+param fixed_cost[Depots] unit "cost" "What it costs to run a depot at all" = {
+    north: 100, south: 80 }
+param minimum[Depots] unit "units" "Least a depot may carry once it is open" = {
+    north: 40, south: 25 }
+param unit_cost[Depots, Customers] unit "cost/unit" = {
+    (north, a): 2, (north, b): 5, (north, c): 6,
+    (south, a): 6, (south, b): 2, (south, c): 3 }
+
+# The ceiling is not decoration: it is what lets the conditional rule below be
+# compiled without anyone inventing a constant.
+var ship[Depots, Customers] continuous in [0, 60]
+  means "Units sent from this depot to this customer"
+
+var open[Depots] binary means "Run this depot at all"
+
+constraint meet_demand "Every customer gets what they asked for"
+  category operational
+  forall t in Customers:
+    sum(ship[d, t] for d in Depots) == demand[t]
+
+constraint ship_only_from_open_depots "Nothing leaves a depot that is shut"
+  category physical
+  because "This one stays linear on its own, because a closed depot's ceiling "
+          "is simply zero"
+  forall d in Depots:
+    sum(ship[d, t] for t in Customers) <= capacity[d] * open[d]
+
+constraint worth_opening "A depot that opens carries at least its minimum"
+  category operational
+  because "Running a depot for a handful of units costs more in overhead than "
+          "the shipping it saves, and this is the rule that cannot be written "
+          "without a constant to switch it off with"
+  forall d in Depots:
+    if open[d] then sum(ship[d, t] for t in Customers) >= minimum[d]
+
+minimize total_cost "Running the depots and shipping from them" unit "cost":
+  sum(fixed_cost[d] * open[d] for d in Depots) +
+    sum(unit_cost[d, t] * ship[d, t] for d in Depots, t in Customers)
+
+assume a_closed_depot_costs_nothing "A depot that is shut has no running cost"
+  because "Otherwise the decision is not whether to open but whether to build, "
+          "which is a different question over a different horizon"
+  affects total_cost
+
+assume the_minimum_is_a_policy_not_a_capacity "The minimum is what makes a depot "
+                                              "worth running, not what it can "
+                                              "physically do"
+  because "A capacity floor would be a hard fact about the building; this is a "
+          "judgement about overhead, and it is the kind of rule that gets "
+          "dropped when it is hard to write"
+  affects worth_opening
+
+scenario ignore_minimums "Open a depot for any amount"
+  "The same problem with the minimums removed, which is what a model that could "
+  "not express a conditional rule would have had to settle for."
+  set minimum[north] to 0
+  set minimum[south] to 0

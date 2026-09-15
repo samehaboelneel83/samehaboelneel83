@@ -89,6 +89,43 @@ class FlatModel(BaseModel):
     def var_index(self) -> dict[str, FlatVar]:
         return {v.key: v for v in self.variables}
 
+    def signature(self) -> str:
+        """Hash of the system itself: columns, rows, objective, and nothing else.
+
+        Distinct from the IR fingerprint, which hashes the problem model as it
+        happens to be spelled — its prose, the order values were written in, and
+        every field the IR has today. That makes the fingerprint right for "is
+        this the same stored model" and wrong for "does this still solve the
+        same problem", because adding a field to the IR moves every fingerprint
+        in existence while changing nothing anyone solves.
+
+        This is the second question, so it is built from a projection that only
+        the system can move.
+        """
+        import hashlib
+        import json
+
+        payload = {
+            "columns": sorted(
+                (v.key, v.kind, v.lb, v.ub, v.role) for v in self.variables
+            ),
+            "rows": sorted(
+                (c.key, c.op, c.rhs, sorted(c.terms.items()), c.penalty)
+                for c in self.constraints
+            ),
+            "objective": {
+                "sense": self.objective.sense,
+                "terms": sorted(self.objective.terms.items()),
+                "quadratic": sorted(
+                    (q.i, q.j, q.coef) for q in self.objective.quadratic
+                ),
+                "constant": self.objective.constant,
+            },
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode()
+        ).hexdigest()
+
     def stats(self) -> dict:
         kinds: dict[str, int] = {}
         for v in self.variables:

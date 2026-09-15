@@ -206,6 +206,46 @@ whole platform is built to avoid, and it is not worth one fewer object.
 
 ---
 
+### A big-M is derived from the model or it is refused
+
+Conditional rules need a constant, and this platform will not invent one. The
+value comes from the reach of the row itself — how far its left-hand side can
+move, given the declared bounds of the columns it is built from — and where
+those bounds leave the relevant side open, the compiler refuses and names it.
+
+The earlier position was stricter: make the author state the bound. Phase 2
+changed the facts. Diagnosis already derives a big-M this way, and this file
+already records why that is allowed — the constant is read off the model rather
+than chosen. Demanding a hand-written bound where the model already proves one
+would be ceremony, and ceremony is what gets skipped.
+
+Only the side the rule needs has to be bounded: a ``>=`` rule relaxes downwards
+and needs the floor, a ``<=`` rule needs the ceiling. Giving up both whenever
+one is open would refuse rules the model does prove.
+
+A conditional equality is refused outright. It is two rules with two constants,
+and writing it as one hides that.
+
+---
+
+### A model has two identities, and they answer different questions
+
+The **IR fingerprint** hashes the problem model as it is spelled: its prose, the
+order values were written in, every field the IR has. It answers "is this the
+same stored model", which is what model versioning needs.
+
+The **flat signature** hashes only the system — columns, rows, objective. It
+answers "does this still solve the same problem".
+
+They were conflated, and it caused two rounds of false alarms: adding
+``penalty`` to a constraint moved every fingerprint in existence, and so did
+adding ``when``. Tests that pinned a fingerprint to prove a refactor changed
+nothing then failed for a reason that had nothing to do with the refactor —
+which trains people to re-pin without looking. Regression tests pin the
+signature; version identity uses the fingerprint.
+
+---
+
 ### A fingerprint must not depend on the process that computed it
 
 The model fingerprint says two models compile identically, and the database

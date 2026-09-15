@@ -490,6 +490,20 @@ class Parser:
             self.expect("symbol", ":", what="':' after the filter")
             self.skip_newlines()
 
+        if self.at_any("name", ("if",)):
+            self.advance()
+            node.when_is = 0.0 if self.accept("keyword", "not") else 1.0
+            node.when = self.expression()
+            while self.at("newline"):
+                self.advance()
+            if not self.at_any("name", ("then",)):
+                raise self.error(
+                    "a conditional rule needs 'then' and what follows from it",
+                    hint="write: if open[d] then <the rule>",
+                )
+            self.advance()
+            self.skip_newlines()
+
         if self.counted_body(node):
             if not node.statement:
                 raise self.error(

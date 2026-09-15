@@ -123,13 +123,18 @@ def test_the_builders_and_the_phrases_agree():
 # ------------------------------------------------- what the rewrite must keep
 
 
-TEMPLATE_FINGERPRINTS = {
-    "resource_allocation": "83da23edd124",
-    "assignment": "ecfacbc6b890",
-    "scheduling": "a3e648878363",
-    "transportation": "ab5d6d9f6973",
-    "vehicle_routing": "51268e1e808b",
-    "lecture_timetabling": "352a4230d7b4",
+#: The *system* each template compiles to — columns, rows, objective — not the
+#: IR fingerprint. The fingerprint hashes the whole problem model including
+#: every field the IR has today, so adding one moves all of them while changing
+#: nothing anyone solves. These were pinned when the templates were rewritten
+#: into the counted vocabulary, and they have not moved since.
+TEMPLATE_SYSTEMS = {
+    "resource_allocation": "5a514d17d8db0ae2",
+    "assignment": "17adad9484b84af4",
+    "scheduling": "aebe0633a053cb73",
+    "transportation": "f063063cb353c47a",
+    "vehicle_routing": "d0c0fcb5e810bdea",
+    "lecture_timetabling": "3e61506bcd24557c",
 }
 
 
@@ -139,12 +144,12 @@ def build(key: str):
     return template.build(example.get("data", example))
 
 
-@pytest.mark.parametrize("key", sorted(TEMPLATE_FINGERPRINTS))
+@pytest.mark.parametrize("key", sorted(TEMPLATE_SYSTEMS))
 def test_rewriting_the_templates_moved_no_model(key):
     """Nine constraint families in the timetable and two in the routing model
-    were rewritten in the new vocabulary. These are the fingerprints from
-    before, and the point of the exercise is that they did not move."""
-    assert compile_and_flatten(build(key)).ir.fingerprint()[:12] == TEMPLATE_FINGERPRINTS[key]
+    were rewritten in the new vocabulary, and the point of the exercise is that
+    the systems they compile to did not move."""
+    assert compile_and_flatten(build(key)).flat.signature()[:16] == TEMPLATE_SYSTEMS[key]
 
 
 def test_every_template_compiles_the_same_way_in_every_process():

@@ -258,6 +258,8 @@ class Lowering:
             statement=decl.statement,
             category=decl.category,
             penalty=decl.penalty,
+            when=self._expression(decl.when, scope) if decl.when is not None else None,
+            when_is=decl.when_is,
             rationale=decl.rationale,
             forall=[IrBinding(index=b.index, set=b.set_name) for b in decl.forall],
             where=self._predicate(decl.where, scope) if decl.where else None,

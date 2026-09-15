@@ -101,6 +101,11 @@ class IRConstraint(BaseModel):
     """Cost of one unit of violation, or ``None`` for a rule that holds
     absolutely. A penalty makes the family soft: the compiler gives each of its
     rows room to be broken and charges the objective for using it."""
+    when: Expr | None = None
+    """A binary decision this rule waits on. With it the family is conditional:
+    the row is enforced when the condition holds and is slack otherwise."""
+    when_is: float = 1.0
+    """The value of ``when`` that switches the rule on — 0 for 'if not'."""
 
     @property
     def soft(self) -> bool:

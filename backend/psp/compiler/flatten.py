@@ -7,6 +7,8 @@ what lets a solution be replayed against the exact model that produced it.
 
 from __future__ import annotations
 
+import math
+
 from psp.compiler.errors import CompileError, DomainError
 from psp.compiler.evaluator import Affine, Evaluator, Quadratic
 from psp.compiler.flat import FlatConstraint, FlatModel, FlatObjective, FlatVar, QuadTerm
@@ -79,6 +81,10 @@ def flatten(model: IRModel) -> FlatModel:
                         where=c.name,
                     )
                 continue
+            op, rhs_value = c.rel.op, -body.constant
+            if c.when is not None:
+                body, op, rhs_value = _apply_condition(c, body, env, ev, columns, key)
+
             terms = dict(body.terms)
             violation_keys: list[str] = []
             if c.soft:
@@ -89,8 +95,8 @@ def flatten(model: IRModel) -> FlatModel:
                     key=key,
                     name=c.name,
                     terms=terms,
-                    op=c.rel.op,
-                    rhs=-body.constant,
+                    op=op,
+                    rhs=rhs_value,
                     index=index,
                     statement=c.statement,
                     penalty=c.penalty,
@@ -148,6 +154,67 @@ def _violation_kind(c: IRConstraint, body, columns: dict[str, FlatVar]) -> str:
     return "integer" if integral and float(body.constant).is_integer() else "continuous"
 
 
+def _apply_condition(c, body, env, ev, columns: dict[str, FlatVar], key: str):
+    """Rewrite one row of a conditional family so it applies only when it should.
+
+    ``if y then body <= 0`` becomes ``body + M*y <= M``: at ``y = 1`` it is the
+    rule, and at ``y = 0`` it says ``body <= M``, which is no restriction so
+    long as M is at least as large as ``body`` can ever be.
+
+    That "so long as" is the whole difficulty with a big-M, and the reason this
+    platform refuses to invent one. Here it is not invented: M is the row\'s own
+    reach, read off the bounds of the columns the row is built from. Where those
+    bounds do not prove a value, the compiler says so and stops rather than
+    choosing a number that would quietly make the rule toothless — or, if it
+    chose too small a one, quietly change what the model means.
+    """
+    condition = ev.affine(c.when, env)
+    if isinstance(condition, str) or len(condition.terms) != 1 or condition.constant:
+        raise CompileError(
+            f"the condition on '{c.name}' is not a single decision", where=key,
+        )
+    (switch, coefficient), = condition.terms.items()
+    column = columns.get(switch)
+    if coefficient != 1.0 or column is None or column.kind != "binary":
+        raise CompileError(
+            f"'{c.name}' waits on '{switch}', which is not a binary decision",
+            where=key,
+        )
+    if c.rel.op == "eq":
+        raise CompileError(
+            f"'{c.name}' is conditional and states an equality, which is two "
+            "rules rather than one; write both halves, 'if ... then a <= b' "
+            "and 'if ... then a >= b'",
+            where=key,
+        )
+
+    # The row as the solver will see it: terms on the left, a number on the right.
+    rhs = -body.constant
+    lo, hi = _row_reach(body, columns)
+    slack_needed = (None if hi is None else hi - rhs) if c.rel.op == "le" else (
+        None if lo is None else rhs - lo
+    )
+    if slack_needed is None:
+        raise CompileError(
+            f"'{c.name}' applies only under a condition, so it needs to know how "
+            "far it can reach when the condition does not hold, and the variables "
+            "it is built from are not bounded enough to say; give them finite "
+            "bounds, or state the rule without a condition",
+            where=key,
+        )
+    reach = max(0.0, slack_needed)
+    active = c.when_is == 1.0
+
+    if c.rel.op == "le":
+        # active:  T + M*y <= R + M      inactive at y=0, since T <= hi <= R + M
+        # negated: T - M*y <= R          the same, read the other way round
+        body.terms[switch] = body.terms.get(switch, 0.0) + (reach if active else -reach)
+        return body, "le", rhs + (reach if active else 0.0)
+
+    body.terms[switch] = body.terms.get(switch, 0.0) + (-reach if active else reach)
+    return body, "ge", rhs - (reach if active else 0.0)
+
+
 def _row_reach(body, columns: dict[str, FlatVar]) -> tuple[float | None, float | None]:
     """How low and how high this row's left-hand side can reach.
 
@@ -156,17 +223,35 @@ def _row_reach(body, columns: dict[str, FlatVar]) -> tuple[float | None, float |
     leaving the cap off would cost a discrete model its engine the moment one
     of its rules became soft.
     """
-    lo = hi = 0.0
+    lo: float | None = 0.0
+    hi: float | None = 0.0
     for key, coef in body.terms.items():
         column = columns.get(key)
         if column is None:
             return None, None
-        low = coef * column.lb
-        high = None if column.ub is None else coef * column.ub
-        if high is None:
-            return (None, None) if coef > 0 else (None, None)
-        lo += min(low, high)
-        hi += max(low, high)
+        ends = []
+        for bound in (column.lb, column.ub):
+            ends.append(None if bound is None or math.isinf(bound) else coef * bound)
+        # An open end only takes away the side it is open towards, which depends
+        # on the sign of the coefficient. Losing both would refuse rules that the
+        # bounds do prove.
+        if None in ends:
+            open_low = (ends[0] is None) if coef >= 0 else (ends[1] is None)
+            if open_low:
+                lo = None
+            else:
+                hi = None
+            known = next((e for e in ends if e is not None), None)
+            if known is not None:
+                if lo is not None:
+                    lo += known
+                if hi is not None:
+                    hi += known
+            else:
+                lo = hi = None
+            continue
+        lo = None if lo is None else lo + min(*ends)
+        hi = None if hi is None else hi + max(*ends)
     return lo, hi
 
 

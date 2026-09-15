@@ -129,6 +129,28 @@ Every built-in template can be read back as source (`GET /api/dsl/templates/{key
 which is the fastest way to learn the language — and there is a test asserting
 all six survive the round trip with an identical model fingerprint.
 
+### Rules that apply only under a condition
+
+```
+forall d in Depots:
+  if open[d] then sum(ship[d, t] for t in Customers) >= minimum[d]
+```
+
+A rule that switches off is a rule with a constant in it — large enough that
+the off case restricts nothing, small enough that the on case still bites.
+Choosing it badly does not fail: too small and the model quietly means
+something else, too large and it solves slowly and rounds badly.
+
+So the constant is not written and not invented. It is read off the bounds of
+the variables the rule is built from, and the generated row is the one an
+expert would have written by hand — a test asserts exactly that, coefficient
+for coefficient. Where the bounds do not prove a value the compiler refuses and
+says which side is open, rather than choosing a number nobody picked.
+
+`examples/depot_opening.psp` is the worked example: without the rule the
+cheapest plan opens a depot for thirty units against a minimum of forty, and
+the rule costs exactly thirty to obey.
+
 ### Saying what kind of rule a rule is
 
 Two shapes recur in every model here, and both read better named than encoded:

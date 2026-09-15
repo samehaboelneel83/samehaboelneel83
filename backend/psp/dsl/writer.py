@@ -193,6 +193,10 @@ def _constraint(c) -> list[str]:
         lines.append(f"  soft penalty {_number(c.penalty)}")
     if c.rationale:
         lines.append(f"  because {_quote(c.rationale)}")
+    condition = ""
+    if c.when is not None:
+        negated = "not " if c.when_is == 0 else ""
+        condition = f"if {negated}{_expr(c.when)} then "
     header = ""
     if c.forall:
         header = "forall " + ", ".join(f"{b.index} in {_name(b.set)}" for b in c.forall)
@@ -200,7 +204,7 @@ def _constraint(c) -> list[str]:
         header = (header + " " if header else "") + f"where {_predicate(c.where)}"
     if header:
         lines.append(f"  {header}:")
-    lines.append(f"    {_relation(c.rel)}")
+    lines.append(f"    {condition}{_relation(c.rel)}")
     return lines
 
 

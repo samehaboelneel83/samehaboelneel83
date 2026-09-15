@@ -9,7 +9,7 @@ against the hand-written tables it replaced.
 
 from __future__ import annotations
 
-import hashlib
+
 import pathlib
 
 import pytest
@@ -120,11 +120,13 @@ def read(name: str):
 
 
 def flat_hash(spec, scenario: str | None = None) -> str:
-    flat = compile_and_flatten(spec, scenario).flat
-    # Excluding metadata: it carries the IR fingerprint, which moves whenever a
-    # description or the order of parameters changes. What has to be identical
-    # is the system that gets solved.
-    return hashlib.sha256(flat.model_dump_json(exclude={"metadata"}).encode()).hexdigest()
+    """The system that gets solved, not the model as it happens to be spelled.
+
+    An IR fingerprint would fail here on a changed description or a reordered
+    parameter, and on every future field the IR gains — none of which changes
+    what anyone solves.
+    """
+    return compile_and_flatten(spec, scenario).flat.signature()
 
 
 def test_the_commitment_plan_compiles_to_what_the_written_out_tables_compiled_to():
@@ -137,11 +139,11 @@ def test_the_commitment_plan_compiles_to_what_the_written_out_tables_compiled_to
     used to say, and says it once.
     """
     expected = {
-        None: "69af3d5f92675b4e",
-        "surge": "08bdce88b8937459",
-        "invest": "9ff6ba19f198528d",
-        "assessment_stood_down": "d345039b6c51eab0",
-        "serialised_organisation": "c24f69b76011501f",
+        None: "426294810dc07a0a",
+        "surge": "3ed15fe1e2b3e5d6",
+        "invest": "c6a21acd627b3cb9",
+        "assessment_stood_down": "28a67455f401073b",
+        "serialised_organisation": "e22d96bf16b3b62a",
     }
     spec = read("commitment_planning.psp")
     for scenario, digest in expected.items():

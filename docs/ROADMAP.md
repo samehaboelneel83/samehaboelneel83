@@ -193,7 +193,7 @@ to do when they do not prove it.
 
 ---
 
-## Phase 5 — Conditional constraints — *needs a decision first*
+## Phase 5 — Conditional constraints — **done**
 
 `IF / THEN` and `XOR` need indicator variables, which means big-M. That runs
 straight into a standing decision: *reject non-linear expressions instead of
@@ -204,15 +204,30 @@ An auto-generated big-M is exactly that. It picks a constant the author never
 chose, and picking it badly is not an error — it is a wrong answer, or a
 relaxation so loose the solve never finishes.
 
-**Recommendation:** require the bound from the author, so the constant is
-always theirs:
+**Settled differently from the recommendation, and deliberately.** The advice
+here was to make the author state the bound. By the time it was built, Phase 2
+had already derived a big-M from a row\'s own reach and `DECISIONS.md` had
+recorded why that is allowed — the constant is read off the model, not chosen.
+Requiring a hand-written bound where the model already proves one is ceremony,
+and ceremony gets skipped. So:
 
 ```
-if allocate[c, u, p] then load[u, horizon] <= 40 within [0, 500]
+forall d in Depots:
+  if open[d] then sum(ship[d, t] for t in Customers) >= minimum[d]
 ```
 
-This is a policy call, not a coding task. Nothing should be built here until it
-is settled.
+derives its constant from the declared bounds, and produces the row an expert
+would write by hand. Where the relevant side is unbounded it refuses and says
+which. A conditional equality is refused as two rules wearing one coat.
+
+**XOR is not here, because it was already here.** Exactly one of a set of
+binaries is what Phase 4\'s `exactly 1 of` says, and a second spelling would
+have been worse than none.
+
+**Still open:** a condition on a linear expression rather than on a single
+binary — `if total_load >= 40 then ...` — needs an auxiliary binary and two
+indicators to tie it to the expression. It is a real extension, not sugar, and
+should wait until a model here needs it.
 
 ---
 

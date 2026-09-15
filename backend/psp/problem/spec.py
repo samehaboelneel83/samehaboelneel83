@@ -99,6 +99,10 @@ class ProblemConstraint(BaseModel):
     """What one unit of violation costs. ``None`` means the constraint is hard
     and cannot be violated at any price, which is the default: a rule is only
     negotiable when someone says so and says what the price is."""
+    when: Expr | None = None
+    """A binary decision this rule waits on, or ``None`` for a rule that always
+    applies."""
+    when_is: float = 1.0
     rationale: str | None = None
     origin: SourceRef | None = None
 
