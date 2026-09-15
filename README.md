@@ -83,7 +83,8 @@ domain layers. That is what makes replacing an engine a contained change.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the reasoning behind each
 decision, and [`docs/DECISIONS.md`](docs/DECISIONS.md) for the ones that were
-made deliberately against the obvious choice.
+made deliberately against the obvious choice. [`docs/ROADMAP.md`](docs/ROADMAP.md)
+is the other direction: what is missing, and the order it should be built in.
 
 ## What is deliberately not here
 
