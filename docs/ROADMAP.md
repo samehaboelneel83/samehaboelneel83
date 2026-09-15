@@ -154,7 +154,7 @@ tree is a range of periods rather than a parent map, so it stays as data.
 
 ---
 
-## Phase 4 — A constraint vocabulary
+## Phase 4 — A constraint vocabulary — **first forms done**
 
 Temporal (`before`, `after`, `no_overlap`, `min_gap`, `deadline`,
 `recurrence`), dependency (`requires`, `excludes`, `precedes`) and cardinality
@@ -162,12 +162,34 @@ Temporal (`before`, `after`, `no_overlap`, `min_gap`, `deadline`,
 already has, so there is no solver risk and no new mathematics — but the
 surface area is wide.
 
-**Build it from the templates, not from the list.** Each form earns its place
-by removing hand-written algebra from a model that exists. A vocabulary
-designed speculatively is a vocabulary nobody's problem quite fits.
+**Built from the templates, not from the list.** Classifying all 60 constraint
+families across the six templates and four examples gave the order to build in:
 
-**Done when** the scheduling, routing and timetabling templates are shorter and
-still compile to the same models they do today.
+| shape | uses |
+|---|---|
+| plain algebra, no sum | 23 |
+| sum compared to an expression | 19 |
+| **sum forbidden at zero** | **9** |
+| **sum against a constant** | **9** |
+
+So `never`, `at most`, `at least` and `exactly` were built, in the language and
+as Python builders, and eleven constraint families across the timetabling and
+routing templates were rewritten in them. Fingerprints pinned before and after:
+unmoved.
+
+**Not built, deliberately.** Temporal forms — `before`, `no_overlap`,
+`min_gap`, `recurrence` — were on the list and are not here. The timetable\'s
+occupancy arithmetic is the hardest algebra in this repository and the most
+worth replacing, but a general construct for "an activity occupies a span"
+needs a design, and a speculative one would be worse than what it replaced.
+That is the next increment, and it should start from the same kind of survey.
+
+**A limitation worth recording.** The writer emits the long form, so a model
+written with `never` is written back as `sum(...) == 0`. The model is
+identical and the round trip holds; the phrasing is not preserved. Recognising
+the shape on the way out is possible but only sound where the counted quantity
+cannot go negative, so it needs the variable bounds and a decision about what
+to do when they do not prove it.
 
 ---
 

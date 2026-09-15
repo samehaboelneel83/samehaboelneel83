@@ -240,16 +240,16 @@ constraint only_assigned_units "A commitment runs only at a level it is assigned
   category policy
   because "The level a commitment is booked at is a decision about who owns it, "
           "not a decision the plan is free to make"
-  sum(allocate[c, u, p] for c in Commitments, u in Units, p in Periods
-      where assigned[c, u] == 0) == 0
+  never allocate[c, u, p] for c in Commitments, u in Units, p in Periods
+    where assigned[c, u] == 0
 
 constraint respect_availability "Nothing runs when any unit it engages is unavailable"
   category physical
   because "A commitment at a branch needs every unit beneath it, and a unit is also "
           "stopped by anything reserved above it — so the block travels both ways "
           "along the path"
-  sum(allocate[c, u, p] for c in Commitments, u in Units, p in Periods, a in Units
-      where unit_overlap[a, u] > 0 and available[a, p] == 0) == 0
+  never allocate[c, u, p] for c in Commitments, u in Units, p in Periods, a in Units
+    where unit_overlap[a, u] > 0 and available[a, p] == 0
 
 constraint specialty_capacity_at_every_level "A capability is not oversubscribed at "
                                              "any level of the specialty tree"

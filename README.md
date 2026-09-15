@@ -129,6 +129,31 @@ Every built-in template can be read back as source (`GET /api/dsl/templates/{key
 which is the fastest way to learn the language — and there is a test asserting
 all six survive the round trip with an identical model fingerprint.
 
+### Saying what kind of rule a rule is
+
+Two shapes recur in every model here, and both read better named than encoded:
+
+```
+never allocate[c, u, p] for c in Commitments, u in Units, p in Periods
+  where assigned[c, u] == 0
+
+forall u in Units, p in Periods where is_leaf[u] == 1:
+  at most 1 of allocate[c, u2, p] for c in Commitments, u2 in Units
+    where unit_covers[u2, u] == 1
+```
+
+`never`, `at most`, `at least` and `exactly` build exactly the rows the long
+form builds — a test asserts the fingerprints match — and the same four exist
+as builders for templates written in Python. The words are recognised where a
+counted rule can start, not reserved, so a model may still have a parameter
+called `exactly`.
+
+They earned their place by count: across the six templates and four examples,
+60 constraint families, nine are a sum forbidden at zero and nine are a sum
+held against a number. Temporal forms were considered and left out — a general
+occupancy construct is a design job, and a speculative one would be worse than
+the explicit offset arithmetic the timetable has now.
+
 ### Hierarchies
 
 A tree is declared once, and what the rules need from it is derived:

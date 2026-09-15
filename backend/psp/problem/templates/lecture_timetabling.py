@@ -60,7 +60,9 @@ infeasible for no good reason.
 
 from __future__ import annotations
 
-from psp.ir.dsl import add, all_of, cmp, eq, i, le, mul, num, over, p, sub, total, v
+from psp.ir.dsl import (
+    add, all_of, at_most, cmp, eq, i, le, mul, never, num, over, p, sub, total, v,
+)
 from psp.problem.spec import (
     Assumption,
     ProblemConstraint,
@@ -411,7 +413,11 @@ class LectureTimetablingTemplate(ProblemTemplate):
         busy: dict[str, float] = {}
         for key, o in offerings.items():
             for g in o["groups"]:
-                for related in {g, *ancestors(g), *descendants[g]}:
+                # Sorted, because this set is iterated into a table whose key
+                # order reaches the model fingerprint — and Python orders a set
+                # of strings differently in each process. Without it the same
+                # timetable compiled to a different fingerprint every run.
+                for related in sorted({g, *ancestors(g), *descendants[g]}):
                     busy[f"{key}|{related}"] = 1.0
         is_leaf = {g: (1.0 if g in leaves else 0.0) for g in group_keys}
         room_type_ok = {
@@ -618,14 +624,11 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 category="physical",
                 rationale="Slots are numbered across the week, so without this a session "
                           "would silently continue into the next morning.",
-                rel=eq(
-                    total(
-                        v("place", i("o"), i("r"), i("t")),
-                        where=cmp("gt", add(p("slot_in_day", i("t")), p("duration", i("o"))),
-                                  p("slots_per_day")),
-                        o="Offerings", r="Rooms", t="Slots",
-                    ),
-                    num(0),
+                rel=never(
+                    v("place", i("o"), i("r"), i("t")),
+                    where=cmp("gt", add(p("slot_in_day", i("t")), p("duration", i("o"))),
+                              p("slots_per_day")),
+                    o="Offerings", r="Rooms", t="Slots",
                 ),
             ),
             ProblemConstraint(
@@ -633,13 +636,10 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 statement="A room must seat everyone enrolled in the offering placed in it.",
                 category="physical",
                 forall=[],
-                rel=eq(
-                    total(
-                        v("place", i("o"), i("r"), i("t")),
-                        where=cmp("lt", p("capacity", i("r")), p("enrolment", i("o"))),
-                        o="Offerings", r="Rooms", t="Slots",
-                    ),
-                    num(0),
+                rel=never(
+                    v("place", i("o"), i("r"), i("t")),
+                    where=cmp("lt", p("capacity", i("r")), p("enrolment", i("o"))),
+                    o="Offerings", r="Rooms", t="Slots",
                 ),
             ),
             ProblemConstraint(
@@ -647,13 +647,10 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 statement="A course must be taught in a room of the type it requires — "
                           "a laboratory course needs a laboratory.",
                 category="regulatory",
-                rel=eq(
-                    total(
-                        v("place", i("o"), i("r"), i("t")),
-                        where=cmp("eq", p("room_type_ok", i("o"), i("r")), num(0)),
-                        o="Offerings", r="Rooms", t="Slots",
-                    ),
-                    num(0),
+                rel=never(
+                    v("place", i("o"), i("r"), i("t")),
+                    where=cmp("eq", p("room_type_ok", i("o"), i("r")), num(0)),
+                    o="Offerings", r="Rooms", t="Slots",
                 ),
             ),
             ProblemConstraint(
@@ -663,18 +660,15 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 category="policy",
                 rationale="A session that starts in an available period can still run on "
                           "into an unavailable one.",
-                rel=eq(
-                    total(
-                        v("place", i("o"), i("r"), i("t")),
-                        where=all_of(
-                            cmp("eq", p("teaches", i("o"), i("l")), num(1)),
-                            *occupies("k", i("t")),
-                            cmp("eq", p("lecturer_available", i("l"), add(i("t"), i("k"))),
-                                num(0)),
-                        ),
-                        o="Offerings", r="Rooms", t="Slots", l="Lecturers", k="Offsets",
+                rel=never(
+                    v("place", i("o"), i("r"), i("t")),
+                    where=all_of(
+                        cmp("eq", p("teaches", i("o"), i("l")), num(1)),
+                        *occupies("k", i("t")),
+                        cmp("eq", p("lecturer_available", i("l"), add(i("t"), i("k"))),
+                            num(0)),
                     ),
-                    num(0),
+                    o="Offerings", r="Rooms", t="Slots", l="Lecturers", k="Offsets",
                 ),
             ),
             ProblemConstraint(
@@ -683,16 +677,13 @@ class LectureTimetablingTemplate(ProblemTemplate):
                           "session runs.",
                 category="physical",
                 rationale="A two-period lab must not start before a closure and run through it.",
-                rel=eq(
-                    total(
-                        v("place", i("o"), i("r"), i("t")),
-                        where=all_of(
-                            *occupies("k", i("t")),
-                            cmp("eq", p("room_available", i("r"), add(i("t"), i("k"))), num(0)),
-                        ),
-                        o="Offerings", r="Rooms", t="Slots", k="Offsets",
+                rel=never(
+                    v("place", i("o"), i("r"), i("t")),
+                    where=all_of(
+                        *occupies("k", i("t")),
+                        cmp("eq", p("room_available", i("r"), add(i("t"), i("k"))), num(0)),
                     ),
-                    num(0),
+                    o="Offerings", r="Rooms", t="Slots", k="Offsets",
                 ),
             ),
             ProblemConstraint(
@@ -700,17 +691,14 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 statement="A group is not taught during its blocked periods — fixed events, "
                           "seminars and holidays — for any period the session runs.",
                 category="policy",
-                rel=eq(
-                    total(
-                        v("place", i("o"), i("r"), i("t")),
-                        where=all_of(
-                            cmp("eq", p("busy", i("o"), i("g")), num(1)),
-                            *occupies("k", i("t")),
-                            cmp("eq", p("group_available", i("g"), add(i("t"), i("k"))), num(0)),
-                        ),
-                        o="Offerings", r="Rooms", t="Slots", g="Groups", k="Offsets",
+                rel=never(
+                    v("place", i("o"), i("r"), i("t")),
+                    where=all_of(
+                        cmp("eq", p("busy", i("o"), i("g")), num(1)),
+                        *occupies("k", i("t")),
+                        cmp("eq", p("group_available", i("g"), add(i("t"), i("k"))), num(0)),
                     ),
-                    num(0),
+                    o="Offerings", r="Rooms", t="Slots", g="Groups", k="Offsets",
                 ),
             ),
             ProblemConstraint(
@@ -720,16 +708,14 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 rationale="Counts every session still running at that slot, not only those "
                           "starting there.",
                 forall=over(l="Lecturers", t="Slots"),
-                rel=le(
-                    total(
-                        v("place", i("o"), i("r"), sub(i("t"), i("k"))),
-                        where=all_of(
-                            cmp("eq", p("teaches", i("o"), i("l")), num(1)),
-                            covers("k", i("t")),
-                        ),
-                        o="Offerings", r="Rooms", k="Offsets",
+                rel=at_most(
+                    1,
+                    v("place", i("o"), i("r"), sub(i("t"), i("k"))),
+                    where=all_of(
+                        cmp("eq", p("teaches", i("o"), i("l")), num(1)),
+                        covers("k", i("t")),
                     ),
-                    num(1),
+                    o="Offerings", r="Rooms", k="Offsets",
                 ),
             ),
             ProblemConstraint(
@@ -737,13 +723,11 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 statement="A room cannot host two sessions at the same time.",
                 category="physical",
                 forall=over(r="Rooms", t="Slots"),
-                rel=le(
-                    total(
-                        v("place", i("o"), i("r"), sub(i("t"), i("k"))),
-                        where=covers("k", i("t")),
-                        o="Offerings", k="Offsets",
-                    ),
-                    num(1),
+                rel=at_most(
+                    1,
+                    v("place", i("o"), i("r"), sub(i("t"), i("k"))),
+                    where=covers("k", i("t")),
+                    o="Offerings", k="Offsets",
                 ),
             ),
             ProblemConstraint(
@@ -752,16 +736,14 @@ class LectureTimetablingTemplate(ProblemTemplate):
                 category="physical",
                 forall=over(g="Groups", t="Slots"),
                 where=cmp("eq", p("is_leaf", i("g")), num(1)),
-                rel=le(
-                    total(
-                        v("place", i("o"), i("r"), sub(i("t"), i("k"))),
-                        where=all_of(
-                            cmp("eq", p("busy", i("o"), i("g")), num(1)),
-                            covers("k", i("t")),
-                        ),
-                        o="Offerings", r="Rooms", k="Offsets",
+                rel=at_most(
+                    1,
+                    v("place", i("o"), i("r"), sub(i("t"), i("k"))),
+                    where=all_of(
+                        cmp("eq", p("busy", i("o"), i("g")), num(1)),
+                        covers("k", i("t")),
                     ),
-                    num(1),
+                    o="Offerings", r="Rooms", k="Offsets",
                 ),
             ),
             ProblemConstraint(

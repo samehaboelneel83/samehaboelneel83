@@ -63,7 +63,7 @@ constraint honour_days_off "Nobody works a day they asked off"
   category policy
   soft penalty 20
   because "Requests are kept unless keeping them would leave a day uncovered"
-  sum(on_duty[p, d] for p in People, d in Days where asked_off[p, d] == 1) == 0
+  never on_duty[p, d] for p in People, d in Days where asked_off[p, d] == 1
 
 constraint spread_the_week "Nobody works more than one day in the week"
   category policy

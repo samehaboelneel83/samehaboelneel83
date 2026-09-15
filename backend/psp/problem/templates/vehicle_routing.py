@@ -10,7 +10,9 @@ assumption, rather than letting an operator discover it in production.
 
 from __future__ import annotations
 
-from psp.ir.dsl import all_of, differ, eq, ge, i, is_not, le, mul, num, over, p, sub, total, v
+from psp.ir.dsl import (
+    all_of, differ, eq, exactly, ge, i, is_not, le, mul, num, over, p, sub, total, v,
+)
 from psp.problem.spec import (
     Assumption,
     ProblemConstraint,
@@ -114,9 +116,9 @@ class VehicleRoutingTemplate(ProblemTemplate):
                 category="operational",
                 forall=over(j="Nodes"),
                 where=is_not("j", depot),
-                rel=eq(
-                    total(v("travel", i("k"), i("j")), where=differ("k", "j"), k="Nodes"),
-                    num(1),
+                rel=exactly(
+                    1,
+                    v("travel", i("k"), i("j")), where=differ("k", "j"), k="Nodes"
                 ),
             ),
             ProblemConstraint(
@@ -125,9 +127,9 @@ class VehicleRoutingTemplate(ProblemTemplate):
                 category="operational",
                 forall=over(j="Nodes"),
                 where=is_not("j", depot),
-                rel=eq(
-                    total(v("travel", i("j"), i("k")), where=differ("k", "j"), k="Nodes"),
-                    num(1),
+                rel=exactly(
+                    1,
+                    v("travel", i("j"), i("k")), where=differ("k", "j"), k="Nodes"
                 ),
             ),
             ProblemConstraint(

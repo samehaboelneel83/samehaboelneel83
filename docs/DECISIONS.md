@@ -206,6 +206,24 @@ whole platform is built to avoid, and it is not worth one fewer object.
 
 ---
 
+### A fingerprint must not depend on the process that computed it
+
+The model fingerprint says two models compile identically, and the database
+uses it to decide whether a compile produced a new model version. So anything
+that reaches it has to be ordered by the model, never by the runtime.
+
+The timetabling template iterated a Python set of strings into the keys of a
+parameter. A set of strings orders differently in every process, so the same
+timetable compiled to a different fingerprint every run — a new stored version
+each time, and a provenance chain that could not say two runs shared a model.
+It was invisible from inside one process, where the order is stable, and it
+survived a round-trip test that compared a model only against itself.
+
+The fix is one `sorted`. The test is a second interpreter: every template is
+compiled under two different hash seeds and the fingerprints compared.
+
+---
+
 ### An explicitly requested solver is never substituted
 
 Falling back to a capable engine when the requested one cannot take the model

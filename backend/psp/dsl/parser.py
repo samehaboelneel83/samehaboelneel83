@@ -490,6 +490,17 @@ class Parser:
             self.expect("symbol", ":", what="':' after the filter")
             self.skip_newlines()
 
+        if self.counted_body(node):
+            if not node.statement:
+                raise self.error(
+                    f"constraint '{node.name}' has no statement",
+                    hint='put what it means in quotes after the name, so an '
+                         'explanation can cite it',
+                    token=self.tokens[self.pos - 1],
+                )
+            self.end_of_declaration()
+            return node
+
         node.lhs = self.expression()
         self.continues_with(set(), symbols=set(RELATIONS))
         if not self.at_any("symbol", RELATIONS):
@@ -506,6 +517,57 @@ class Parser:
                 token=self.tokens[self.pos - 1],
             )
         self.end_of_declaration()
+        return node
+
+    #: How many of a thing there may be, and the relation each phrase means.
+    COUNTS = {"most": "le", "least": "ge"}
+
+    def counted_body(self, node: ConstraintDecl) -> bool:
+        """Parse ``never ...`` or ``at most N of ...``, if that is what is here.
+
+        Both are the shapes that recur across the models in this repository —
+        a sum of things that must not happen, and a sum held against a plain
+        number. They build exactly the relation the long form builds; what they
+        add is that the rule says what kind of rule it is, instead of leaving a
+        reader to infer it from a zero on the right-hand side.
+        """
+        if self.at_any("name", ("never",)):
+            self.advance()
+            node.op, node.rhs = "eq", Num(line=0, column=0, value=0.0)
+            node.lhs = self.counted_sum()
+            return True
+
+        if not self.at_any("name", ("at", "exactly")):
+            return False
+        word = self.advance().value
+        if word == "exactly":
+            node.op = "eq"
+        else:
+            which = self.identifier("'most' or 'least'")
+            if which not in self.COUNTS:
+                raise self.error(
+                    f"expected 'at most' or 'at least', found 'at {which}'",
+                )
+            node.op = self.COUNTS[which]
+        limit = self.current
+        node.rhs = Num(line=limit.line, column=limit.column, value=self.number())
+        self.expect("keyword", "of", what="'of' and what is being counted")
+        node.lhs = self.counted_sum()
+        return True
+
+    def counted_sum(self) -> Aggregate:
+        """``<expr> for <bindings> [where <predicate>]`` — a sum without its
+        parentheses, since the phrase in front of it already says what it is."""
+        node = Aggregate(line=self.current.line, column=self.current.column)
+        node.body = self.expression()
+        # Unlike the long form, this one is not inside brackets, so a newline
+        # between the parts is a real token. Both continue the phrase.
+        self.continues_with({"for"})
+        self.expect("keyword", "for", what="'for' and what to count over")
+        node.bindings = self.bindings()
+        self.continues_with({"where"})
+        if self.accept("keyword", "where"):
+            node.where = self.predicate()
         return node
 
     def bindings(self) -> list[Binding]:

@@ -93,6 +93,29 @@ def eq(lhs, rhs) -> Rel:
     return Rel(op="eq", lhs=_coerce(lhs), rhs=_coerce(rhs))
 
 
+def never(body, where=None, **bindings: str) -> Rel:
+    """Nothing matching this may happen: ``sum(body over bindings) == 0``.
+
+    The commonest shape in this repository, and the one that reads worst as
+    algebra — a zero on the right-hand side is an encoding of "forbidden", not
+    a statement of it. Sound only where the counted quantity cannot go
+    negative, which for the decision variables it is used on it cannot.
+    """
+    return eq(total(body, where=where, **bindings), num(0))
+
+
+def at_most(limit: float, body, where=None, **bindings: str) -> Rel:
+    return le(total(body, where=where, **bindings), num(limit))
+
+
+def at_least(limit: float, body, where=None, **bindings: str) -> Rel:
+    return ge(total(body, where=where, **bindings), num(limit))
+
+
+def exactly(limit: float, body, where=None, **bindings: str) -> Rel:
+    return eq(total(body, where=where, **bindings), num(limit))
+
+
 def differ(a: str, b: str) -> Cmp:
     """Index ``a`` and index ``b`` are bound to different elements."""
     return Cmp(op="ne", lhs=i(a), rhs=i(b))
