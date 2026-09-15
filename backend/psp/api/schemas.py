@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from psp.problem.spec import ProblemSpec
+from psp.solvers.base import DEFAULT_THREADS
 
 
 class InstantiateRequest(BaseModel):
@@ -31,7 +32,7 @@ class SolveRequest(BaseModel):
     solver: str | None = None
     time_limit_seconds: float | None = None
     relative_gap: float | None = None
-    threads: int = 1
+    threads: int = DEFAULT_THREADS
     seed: int = 0
 
 

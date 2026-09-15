@@ -275,6 +275,43 @@ signature; version identity uses the fingerprint.
 
 ---
 
+### A fixed number of workers, not the machine's
+
+A solve gets four workers unless it asks otherwise, and four is written down
+rather than read from the core count.
+
+The count is not a performance knob. CP-SAT's search depends on how many
+workers it has, so a default taken from the hardware would make the plan depend
+on which computer ran it — two people would get different rosters from the same
+model and neither would be wrong. A fixed number keeps the answer a property of
+the problem.
+
+One worker was the previous default, and it was a placeholder rather than a
+choice: on the commitment plan it was the difference between "feasible" after
+four minutes and "proved optimal" in twenty-seven seconds. A test solves the
+same model in two interpreters and compares the plans, because a reproducibility
+claim that nobody checks is a reproducibility claim that quietly stops being
+true.
+
+---
+
+### A price is a number in the model, not a number in the rule
+
+A soft constraint's penalty is an expression, so it can be a parameter — and a
+parameter is something a scenario can move.
+
+While a price was a literal, "what if keeping requests mattered more?" could
+only be answered by editing the model, which loses the comparison that makes a
+scenario worth having. It is the same argument that keeps scenarios from
+mutating the baseline, applied one level down: the things a planner wants to
+vary belong in the data.
+
+The price still has to be a fixed number by the time a row exists. One that
+depended on a decision would make the objective quadratic in a way nobody
+wrote, and it is refused where constants are evaluated.
+
+---
+
 ### A fingerprint must not depend on the process that computed it
 
 The model fingerprint says two models compile identically, and the database

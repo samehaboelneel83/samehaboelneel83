@@ -97,10 +97,13 @@ class IRConstraint(BaseModel):
     rel: Rel
     statement: str | None = None
     origin: str | None = None
-    penalty: float | None = None
+    penalty: Expr | None = None
     """Cost of one unit of violation, or ``None`` for a rule that holds
     absolutely. A penalty makes the family soft: the compiler gives each of its
-    rows room to be broken and charges the objective for using it."""
+    rows room to be broken and charges the objective for using it.
+
+    Evaluated once per row, so a family may be priced by a parameter that varies
+    across its instances — and so a scenario can reprice it."""
     when: Expr | None = None
     """A binary decision this rule waits on. With it the family is conditional:
     the row is enforced when the condition holds and is slack otherwise."""

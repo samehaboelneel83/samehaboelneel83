@@ -10,7 +10,7 @@ from psp.core.config import Settings, get_settings
 from psp.core.security import current_principal
 from psp.db import models as m
 from psp.db.base import get_session
-from psp.solvers.base import SolveOptions
+from psp.solvers.base import DEFAULT_THREADS, SolveOptions
 
 SessionDep = Depends(get_session)
 PrincipalDep = Depends(current_principal)
@@ -32,7 +32,7 @@ ProblemDep = Depends(get_problem)
 def build_options(
     time_limit_seconds: float | None,
     relative_gap: float | None = None,
-    threads: int = 1,
+    threads: int = DEFAULT_THREADS,
     seed: int = 0,
     settings: Settings | None = None,
 ) -> SolveOptions:

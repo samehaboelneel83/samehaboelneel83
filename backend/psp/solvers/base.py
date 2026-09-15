@@ -44,10 +44,18 @@ class Capabilities(BaseModel):
     requires_bounded_integers: bool = False
 
 
+#: Workers a solve gets unless it asks for otherwise. Fixed, not taken from the
+#: machine: CP-SAT's search depends on how many workers it has, so a default
+#: that read the core count would make the plan depend on which computer ran it.
+#: Four is enough to change the answer from "feasible" to "proved optimal" on
+#: the models here and small enough to leave a server room to serve.
+DEFAULT_THREADS = 4
+
+
 class SolveOptions(BaseModel):
     time_limit_seconds: float = 30.0
     relative_gap: float | None = None
-    threads: int = 1
+    threads: int = DEFAULT_THREADS
     seed: int = 0
     log: bool = False
     extra: dict = Field(default_factory=dict)

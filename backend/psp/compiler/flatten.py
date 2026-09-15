@@ -33,7 +33,29 @@ def flatten(model: IRModel) -> FlatModel:
     # are expanded and charged to the objective once they all exist.
     penalties: dict[str, float] = {}
 
-    def give_room(c: IRConstraint, key: str, body) -> tuple[dict[str, float], list[str]]:
+    def price_of(c: IRConstraint, env: dict, key: str) -> float:
+        """What one unit of violation costs this row.
+
+        Evaluated per row rather than read off the family, so a price can be a
+        parameter — which is what lets a scenario ask "what if keeping this
+        mattered more?" without editing the model.
+        """
+        priced = ev.affine(c.penalty, env, allow_vars=False)
+        if isinstance(priced, str) or not priced.is_constant:
+            raise CompileError(
+                f"the penalty on '{c.name}' is not a fixed number for this rule",
+                where=key,
+            )
+        if priced.constant <= 0:
+            raise CompileError(
+                f"a penalty of {priced.constant:g} makes '{c.name}' free to break",
+                where=key,
+            )
+        return priced.constant
+
+    def give_room(
+        c: IRConstraint, key: str, body, price: float
+    ) -> tuple[dict[str, float], list[str]]:
         """Add the columns that let one row of a soft family be broken.
 
         A ``<=`` row can only be broken upwards and a ``>=`` row only
@@ -53,7 +75,7 @@ def flatten(model: IRModel) -> FlatModel:
                 role="violation",
             )
             terms[slack] = coefficient
-            penalties[slack] = c.penalty
+            penalties[slack] = price
             added.append(slack)
         return terms, added
 
@@ -87,8 +109,10 @@ def flatten(model: IRModel) -> FlatModel:
 
             terms = dict(body.terms)
             violation_keys: list[str] = []
+            price: float | None = None
             if c.soft:
-                room, violation_keys = give_room(c, key, body)
+                price = price_of(c, env, key)
+                room, violation_keys = give_room(c, key, body, price)
                 terms.update(room)
             rows.append(
                 FlatConstraint(
@@ -99,7 +123,7 @@ def flatten(model: IRModel) -> FlatModel:
                     rhs=rhs_value,
                     index=index,
                     statement=c.statement,
-                    penalty=c.penalty,
+                    penalty=price,
                     violation_keys=violation_keys,
                 )
             )

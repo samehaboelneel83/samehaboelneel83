@@ -13,6 +13,7 @@ import pathlib
 import pytest
 
 from psp.compiler import compile_and_flatten
+from psp.compiler.errors import CompileError
 from psp.dsl import ResolveError, parse_problem, write_problem
 from psp.execution.runner import run_solver
 from psp.provenance import build_solution
@@ -221,3 +222,56 @@ def test_a_soft_constraint_round_trips_through_the_language():
         compile_and_flatten(again).ir.fingerprint()
         == compile_and_flatten(spec).ir.fingerprint()
     )
+
+
+def test_a_price_can_be_a_parameter_so_a_scenario_can_move_it():
+    """The question this makes askable: "what if keeping requests mattered more?"
+
+    While a price was a literal it could only be answered by editing the model,
+    which loses the comparison — the whole point of a scenario. Worked by hand:
+    at sixty per override, covering Monday costs 60 plus the two second days
+    (12) for 72, while leaving Monday unstaffed costs 50 plus one second day
+    (6) for 56. So the roster gives up the day rather than the request.
+    """
+    spec = roster()
+    assert spec.parameter("cost_of_an_override").values[0].value == 20.0
+
+    base = compile_and_flatten(spec)
+    reprice = compile_and_flatten(spec, "requests_are_sacred")
+    assert run_solver(base.flat, options=OPTIONS)[0].objective_value == pytest.approx(32.0)
+
+    result, _ = run_solver(reprice.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+    assert result.objective_value == pytest.approx(56.0)
+
+    solution = build_solution(reprice, result)
+    broken = {v.name for v in solution.violations}
+    assert "every_day_is_covered" in broken, "the day was covered at the higher price"
+    assert "honour_days_off" not in broken, "a request was overridden anyway"
+
+    # The rule carries the price the scenario gave it, not the one in the file.
+    override = next(
+        c for c in reprice.flat.constraints if c.name == "honour_days_off"
+    )
+    assert override.penalty == pytest.approx(60.0)
+
+
+def test_a_price_that_is_not_a_fixed_number_is_refused():
+    """A penalty has to be a number by the time a row exists. One that depends
+    on a decision would make the objective quadratic in a way nobody wrote."""
+    source = '''
+problem p "P"
+  "A price that is not known."
+set Things = a, b of thing
+var take[Things] binary means "Take it"
+constraint limit "A limit"
+  soft penalty take[a]
+  sum(take[t] for t in Things) <= 1
+minimize z "z" unit "u":
+  sum(take[t] for t in Things)
+'''
+    with pytest.raises(CompileError) as caught:
+        compile_and_flatten(parse_problem(source))
+    # Caught where constants are evaluated, which says it more plainly than the
+    # penalty-specific check behind it does.
+    assert "used where a constant is required" in str(caught.value)

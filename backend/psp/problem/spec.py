@@ -100,10 +100,15 @@ class ProblemConstraint(BaseModel):
     category: Literal[
         "physical", "policy", "regulatory", "operational", "modelling"
     ] = "operational"
-    penalty: float | None = None
+    penalty: Expr | None = None
     """What one unit of violation costs. ``None`` means the constraint is hard
     and cannot be violated at any price, which is the default: a rule is only
-    negotiable when someone says so and says what the price is."""
+    negotiable when someone says so and says what the price is.
+
+    An expression rather than a number, so a price can be a parameter — and
+    therefore something a scenario can move. "What if keeping requests mattered
+    more?" is a question about a price, and it was unaskable while prices were
+    literals."""
     when: Expr | None = None
     """A binary decision this rule waits on, or ``None`` for a rule that always
     applies."""

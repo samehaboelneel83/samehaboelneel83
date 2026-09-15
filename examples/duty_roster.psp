@@ -33,6 +33,14 @@ param available[People, Days] default 1 "1 when they can work at all that day"
 
 param personal_limit[People] default 2 "Most days anyone may be given in a week"
 
+# The three prices, as parameters rather than numbers written into the rules —
+# which is what lets a scenario ask what the roster would look like if one of
+# them mattered more, instead of that being a question you answer by editing
+# the model and losing the comparison.
+param cost_of_a_gap "What leaving a day uncovered costs" = 50
+param cost_of_an_override "What working someone on a day they asked off costs" = 20
+param cost_of_a_second_day "What giving one person a second day costs" = 6
+
 var on_duty[People, Days] binary means "Put this person on duty this day"
 
 # ------------------------------------------------------------- hard rules
@@ -53,7 +61,7 @@ constraint within_personal_limit "Nobody is given more days than their limit"
 
 constraint every_day_is_covered "Each weekday has exactly one person on duty"
   category operational
-  soft penalty 50
+  soft penalty cost_of_a_gap
   because "A gap in the cover is the worst outcome here, so it is priced above "
           "everything else rather than declared impossible"
   forall d in Days:
@@ -61,13 +69,13 @@ constraint every_day_is_covered "Each weekday has exactly one person on duty"
 
 constraint honour_days_off "Nobody works a day they asked off"
   category policy
-  soft penalty 20
+  soft penalty cost_of_an_override
   because "Requests are kept unless keeping them would leave a day uncovered"
   never on_duty[p, d] for p in People, d in Days where asked_off[p, d] == 1
 
 constraint spread_the_week "Nobody works more than one day in the week"
   category policy
-  soft penalty 6
+  soft penalty cost_of_a_second_day
   because "Five days across three people cannot all be single days, so this is "
           "a preference that is expected to be broken — twice — and priced to "
           "be broken last"
@@ -88,6 +96,12 @@ assume a_rule_is_broken_by_as_little_as_possible "Violation is measured as a "
   affects every_day_is_covered, spread_the_week
 
 # --------------------------------------------------------------- scenarios
+
+scenario requests_are_sacred "A request is worth more than a gap"
+  "The same week with the prices reordered: overriding someone now costs more "
+  "than leaving a day uncovered. The plan changes accordingly — Monday goes "
+  "unstaffed rather than somebody being made to work it."
+  set cost_of_an_override to 60
 
 scenario short_handed "One person is away all week"
   "Two people cannot cover five days within their limits, so the week cannot be "

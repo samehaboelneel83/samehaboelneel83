@@ -231,3 +231,41 @@ def test_sentinel_capacities_do_not_become_constraint_rows():
     lane_rows = [c for c in with_caps.flat.constraints if c.name == "lane_limit"]
     # Exactly the lanes that were actually given a cap, not every lane.
     assert len(lane_rows) == len(capped["lane_capacity"])
+
+
+def test_a_solve_returns_the_same_plan_in_a_different_process():
+    """Solves get several workers by default, and that has to be safe.
+
+    CP-SAT's search depends on how many workers it has, so the worker count is
+    a fixed number rather than the machine's core count — a default read from
+    the hardware would make the plan depend on which computer ran it. With the
+    seed fixed, the same model must give the same plan every time, which only a
+    second interpreter can show.
+    """
+    import os
+    import pathlib as _pathlib
+    import subprocess
+    import sys
+
+    script = (
+        "import sys, json; sys.path.insert(0, '.');"
+        "from psp.compiler import compile_and_flatten;"
+        "from psp.dsl import parse_problem;"
+        "from psp.execution.runner import run_solver;"
+        "from psp.solvers.base import SolveOptions;"
+        "spec = parse_problem(open('../examples/commitment_planning.psp').read());"
+        "flat = compile_and_flatten(spec).flat;"
+        "r, meta = run_solver(flat, options=SolveOptions(time_limit_seconds=120));"
+        "print(meta['solver'], r.status.value, r.objective_value, "
+        "json.dumps(sorted(k for k, v in r.values.items() if v > 0.5)))"
+    )
+    root = _pathlib.Path(__file__).resolve().parents[1]
+    runs = []
+    for seed in ("3", "11"):
+        finished = subprocess.run(
+            [sys.executable, "-c", script], cwd=root, capture_output=True, text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed}, check=True,
+        )
+        runs.append(finished.stdout.strip())
+    assert runs[0].split()[1] == "optimal"
+    assert runs[0] == runs[1], "the same model gave two different plans"

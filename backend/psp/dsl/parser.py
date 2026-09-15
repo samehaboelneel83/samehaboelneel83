@@ -493,7 +493,7 @@ class Parser:
                 self.skip_newlines()
             elif self.accept("keyword", "soft"):
                 self.expect("keyword", "penalty")
-                node.penalty = self.number()
+                node.penalty = self.expression()
                 self.skip_newlines()
             elif self.accept("keyword", "because"):
                 node.rationale = self.string_value("the reason, in quotes")

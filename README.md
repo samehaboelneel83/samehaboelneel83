@@ -250,6 +250,11 @@ direction, at what price — rather than being absorbed into an answer that look
 clean. The penalties appear in the objective breakdown as one component beside
 the stated objectives.
 
+A price is an expression, so it can be a parameter — and therefore something a
+scenario can move. `examples/duty_roster.psp` prices an overridden request at
+20 and asks, in a scenario, what the week looks like at 60: the roster gives up
+a whole day rather than the request, because 50 + 6 beats 60 + 12.
+
 Prices are what let a model be handed an impossible week and still return the
 plan a sensible person would write. In `examples/duty_roster.psp` a missing
 day is priced at 50, an overridden request at 20 and an uneven week at 6; when

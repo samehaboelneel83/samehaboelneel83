@@ -158,7 +158,7 @@ class ConstraintDecl(Located):
     name: str = ""
     statement: str = ""
     category: str = "operational"
-    penalty: float | None = None
+    penalty: Any = None
     when: Any = None
     when_is: float = 1.0
     rationale: str | None = None

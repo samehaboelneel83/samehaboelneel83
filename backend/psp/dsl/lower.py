@@ -262,9 +262,13 @@ class Lowering:
                 f"'{decl.category}' is not a constraint category", decl,
                 hint="use one of " + ", ".join(sorted(CATEGORIES)),
             )
-        if decl.penalty is not None and decl.penalty <= 0:
+        # A price written as a literal is checked here, where the caret can sit
+        # on it. One written as a parameter can only be checked once its value
+        # is known, which the compiler does per rule.
+        literal = _literal_price(decl.penalty)
+        if literal is not None and literal <= 0:
             raise self.fail(
-                f"a penalty of {decl.penalty:g} makes '{decl.name}' free to break",
+                f"a penalty of {literal:g} makes '{decl.name}' free to break",
                 decl,
                 hint="give a positive cost, or drop 'soft' to make the rule hard",
             )
@@ -275,7 +279,9 @@ class Lowering:
             name=decl.name,
             statement=decl.statement,
             category=decl.category,
-            penalty=decl.penalty,
+            penalty=(
+                self._expression(decl.penalty, scope) if decl.penalty is not None else None
+            ),
             when=self._expression(decl.when, scope) if decl.when is not None else None,
             when_is=decl.when_is,
             rationale=decl.rationale,
@@ -452,3 +458,12 @@ def _derived_description(name: str, tree: Hierarchy) -> str:
         tree.depth: f"Steps from the root of {tree.name}",
     }[name]
     return f"{what}, derived from the hierarchy"
+
+
+def _literal_price(node) -> float | None:
+    """The value of a penalty written as a plain number, negated or not."""
+    if isinstance(node, nodes.Num):
+        return node.value
+    if isinstance(node, nodes.Unary) and isinstance(node.arg, nodes.Num):
+        return -node.arg.value if node.op == "-" else node.arg.value
+    return None
