@@ -367,16 +367,23 @@ def test_the_commitment_example_rolls_time_up_through_its_tree():
 
 
 def test_load_rolls_up_the_unit_tree_as_well_as_the_horizon():
-    """One rule aggregates both trees at once: a unit covers its descendants, a
+    """One rule aggregates both trees at once: a unit overlaps its relatives, a
     time node covers its periods. A parent's reported load must be its children's,
-    at every node of the horizon."""
+    at every node of the horizon.
+
+    Because a commitment may sit at any level, load is counted in unit-periods:
+    a commitment run at a branch costs one period from every unit beneath it.
+    That is the only measure in which a parent equals the sum of its children
+    whatever level the work was booked at, so it is the measure checked here."""
     spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
     compiled = compile_and_flatten(spec)
     result, _ = run_solver(compiled.flat, options=OPTIONS)
     assert result.status == SolveStatus.OPTIMAL
     solution = build_solution(compiled, result)
 
-    covers = {tuple(v.index) for v in spec.parameter("unit_covers").values if v.value == 1}
+    overlap = {
+        tuple(v.index): v.value for v in spec.parameter("unit_overlap").values
+    }
     first = {v.index[0]: v.value for v in spec.parameter("first_period").values}
     last = {v.index[0]: v.value for v in spec.parameter("last_period").values}
     allowance = spec.parameter("allowance")
@@ -396,8 +403,8 @@ def test_load_rolls_up_the_unit_tree_as_well_as_the_horizon():
     for unit in compiled.ir.set("Units").elements:
         for node in nodes:
             actual = sum(
-                1 for u, p in allocated
-                if (unit, u) in covers and first[node] <= p <= last[node]
+                overlap.get((unit, u), 0) for u, p in allocated
+                if first[node] <= p <= last[node]
             )
             assert load.get((unit, node), 0.0) == pytest.approx(actual), (unit, node)
             assert actual <= limit.get((unit, node), allowance.default) + 1e-6
@@ -452,18 +459,27 @@ def test_an_interior_unit_allowance_binds_on_its_children():
 
 
 def test_a_parent_unit_blocks_its_children_through_the_tree():
-    """Availability is declared where it belongs and reaches downwards, rather
-    than being copied onto every child before solving."""
+    """Availability is declared where it belongs and travels along the path,
+    rather than being copied onto every unit before solving.
+
+    It has to travel both ways now that a commitment may sit anywhere in the
+    tree: downwards, so a branch that is spoken for stops its units; and
+    upwards, so one unit being unavailable stops a commitment booked above it,
+    which would otherwise have needed that unit in the room."""
     spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
-    covers = {tuple(v.index) for v in spec.parameter("unit_covers").values if v.value == 1}
+    overlap = {
+        tuple(v.index): v.value for v in spec.parameter("unit_overlap").values
+    }
     blocked = {
         (v.index[0], int(v.index[1]))
         for v in spec.parameter("available").values if v.value == 0
     }
-    # The example declares this on branches, not leaves — otherwise the tree is
-    # doing no work here.
+    # The example declares this at both ends of the tree — on a branch, so the
+    # block has somewhere to travel down to, and on a leaf, so it has somewhere
+    # to travel up to. Either one alone would leave half of it untested.
     leaves = {v.index[0] for v in spec.parameter("is_leaf").values if v.value == 1}
-    assert blocked and not {unit for unit, _ in blocked} & leaves
+    declared = {unit for unit, _ in blocked}
+    assert declared & leaves and declared - leaves
 
     compiled = compile_and_flatten(spec)
     result, _ = run_solver(compiled.flat, options=OPTIONS)
@@ -474,14 +490,95 @@ def test_a_parent_unit_blocks_its_children_through_the_tree():
     ]
 
     for _, unit, period in allocated:
-        for branch, at in blocked:
-            assert not ((branch, unit) in covers and at == period), (branch, unit, period)
+        for other, at in blocked:
+            assert not (overlap.get((other, unit), 0) > 0 and at == period), (
+                other, unit, period
+            )
 
-    # A sibling branch is untouched, so the block reached its own children and
+    # A sibling branch is untouched, so the block reached its own units and
     # stopped there rather than blocking the period outright.
     blocked_periods = {at for _, at in blocked}
     elsewhere = [a for a in allocated if a[2] in blocked_periods]
     assert elsewhere, "nothing ran in those periods, so nothing is demonstrated"
+
+    # Upwards is the half that only appears once commitments may sit above the
+    # leaves, and a negative assertion on the baseline does not demonstrate it —
+    # so a scenario stands one leaf down and the work booked above it has to move.
+    stood_down = compile_and_flatten(spec, "assessment_stood_down")
+    result, _ = run_solver(stood_down.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+    away = {
+        int(o.index[1]) for o in spec.scenario("assessment_stood_down").overrides
+        if o.parameter == "available" and o.index[0] == "assessment" and o.value == 0
+    }
+    assert away, "the scenario stands nobody down"
+
+    moved = [
+        (d.index[0], d.index[1], int(d.index[2]))
+        for d in build_solution(stood_down, result).decisions
+        if d.variable == "allocate"
+    ]
+    over_assessment = [
+        a for a in moved if overlap.get((a[1], "assessment"), 0) > 0 and a[2] in away
+    ]
+    assert not over_assessment, over_assessment
+
+    # Not vacuous: the periods themselves stayed open to everyone else, and work
+    # really was booked above the unit that went away.
+    assert [a for a in moved if a[2] in away], "the week emptied out entirely"
+    assert [a for a in moved if a[1] not in leaves], "nothing was booked above a leaf"
+
+
+def test_a_commitment_may_sit_at_any_level_and_engages_everything_beneath_it():
+    """The plan books work at branches as well as leaves, and a branch booking
+    is not a name on a page: every unit under it is in the room, so none of them
+    can be doing anything else at that moment."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    covers = {tuple(v.index) for v in spec.parameter("unit_covers").values if v.value == 1}
+    overlap = {
+        tuple(v.index): v.value for v in spec.parameter("unit_overlap").values
+    }
+    leaves = {v.index[0] for v in spec.parameter("is_leaf").values if v.value == 1}
+    assigned = {
+        (v.index[0], v.index[1]) for v in spec.parameter("assigned").values if v.value == 1
+    }
+    # The example assigns commitments above the leaves, or there is no level to
+    # exercise; and at the leaves too, or every level is the same level.
+    assert {u for _, u in assigned} - leaves
+    assert {u for _, u in assigned} & leaves
+
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+    solution = build_solution(compiled, result)
+    allocated = [
+        (d.index[0], d.index[1], int(d.index[2]))
+        for d in solution.decisions if d.variable == "allocate"
+    ]
+    load = {
+        (d.index[0], d.index[1]): d.value
+        for d in solution.decisions if d.variable == "load"
+    }
+
+    branch_work = [a for a in allocated if a[1] not in leaves]
+    assert branch_work, "the plan booked nothing above a leaf"
+
+    for commitment, branch, period in branch_work:
+        beneath = [u for u in leaves if (branch, u) in covers]
+        assert len(beneath) > 1, branch
+        for unit in beneath:
+            clash = [
+                (c, u) for c, u, p in allocated
+                if p == period and overlap.get((u, unit), 0) > 0
+                and (c, u) != (commitment, branch)
+            ]
+            assert not clash, (unit, period, clash)
+
+    # And it is paid for at every unit it engaged, not once at the branch.
+    for commitment, branch, _ in branch_work:
+        for unit in leaves:
+            if (branch, unit) in covers:
+                assert load[(unit, "horizon")] > 0, unit
 
 
 def test_frequency_is_met_inside_each_node_not_merely_in_total():
@@ -531,11 +628,27 @@ def test_specialty_capacity_binds_at_the_parent_not_only_the_leaves():
     assert baseline.get("capability", 0) >= 1
     assert {"field", "classroom"} & set(baseline)
 
-    # Cutting the root alone bites hard, while every leaf is untouched.
+    # Cutting the root alone bites hard, and it is the only thing cut: the
+    # scenario leaves every craft capacity exactly where it was, so whatever
+    # changes in the plan is the interior node doing the work.
+    scenario = spec.scenario("serialised_organisation")
+    assert {o.parameter for o in scenario.overrides} == {"specialty_capacity"}
+    assert {tuple(o.index) for o in scenario.overrides} == {("capability",)}
+
     serialised = binding_nodes("serialised_organisation")
-    assert serialised["capability"] > baseline.get("capability", 0) * 5
-    for craft in ("mounted", "dismounted", "teaching", "examining"):
-        assert serialised.get(craft, 0) == baseline.get(craft, 0)
+    assert serialised["capability"] > 2 * baseline["capability"]
+
+    # And it costs commitments, which no craft capacity could have caused.
+    weight = {v.index[0]: v.value for v in spec.parameter("weight").values}
+
+    def coverage(name=None):
+        compiled = compile_and_flatten(spec, name)
+        result, _ = run_solver(compiled.flat, options=OPTIONS)
+        solution = build_solution(compiled, result)
+        met = {d.index[0] for d in solution.decisions if d.variable == "met"}
+        return sum(weight[c] for c in met)
+
+    assert coverage("serialised_organisation") < coverage()
 
 
 def test_the_commitment_example_responds_to_its_scenarios():

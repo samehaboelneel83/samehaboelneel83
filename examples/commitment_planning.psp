@@ -1,8 +1,8 @@
 # Hierarchical commitment planning.
 #
-# Not a timetable. Three independent hierarchies meet in one model, and the same
-# rule is written once for each of them — because a level, in every case, is
-# only a set of things that roll up.
+# Three independent hierarchies meet in one model, and the same rule is written
+# once for each, because a level in every case is only a set of things that
+# roll up.
 #
 #   UNIT TREE                SPECIALTY TREE          TIME TREE
 #   organisation             capability              horizon
@@ -13,23 +13,26 @@
 #       instruction              teaching
 #       assessment               examining
 #
-# Commitments compete for limited time by weight; mandatory ones cannot be
-# dropped. Capacity binds at every node of all three trees, so a parent that
-# cannot afford the sum of its children constrains them even when each child
-# would fit on its own.
+# A commitment may be assigned at ANY level of the unit tree, and a commitment
+# on a branch engages everything beneath it: when operations runs a joint
+# exercise, both its units are in it and neither can be doing anything else.
+# Time is therefore counted in unit-periods at the leaves, so a branch
+# commitment costs one period from each unit it engages, and a parent's load is
+# genuinely its children's added together.
 #
 # Written entirely in the problem language. There is no Python behind this file.
 
 problem commitment_plan "Hierarchical commitment planning"
-  "Allocate limited unit time to weighted commitments across an organisation, "
-  "respecting capacity at every level of the unit, specialty and time hierarchies."
+  "Allocate limited time to weighted commitments assigned at any level of an "
+  "organisation, respecting capacity across the unit, specialty and time trees."
 
 # ---------------------------------------------------------------- the trees
 
 set Units = organisation, operations, training, ops_north, ops_south, instruction, assessment of unit
-  "Every node of the unit tree, not only the leaves — capacity binds at each"
+  "Every node of the unit tree. A commitment may be assigned to any of them"
 
-set Commitments = patrol, inspection, drill, course_a, course_b, review, audit of commitment
+set Commitments = all_hands, joint_exercise, patrol, inspection, drill,
+                  course_a, course_b, review, audit of commitment
 
 set Specialties = capability, field, classroom, mounted, dismounted, teaching, examining of specialty
 
@@ -77,8 +80,28 @@ param specialty_covers[Specialties, Specialties] default 0 = {
     (capability, dismounted): 1, (classroom, teaching): 1, (capability, teaching): 1,
     (classroom, examining): 1, (capability, examining): 1 }
 
-param is_leaf[Units] default 0 "1 for a unit that actually spends time" = {
+param is_leaf[Units] default 0 "1 for a unit with nothing beneath it" = {
     ops_north: 1, ops_south: 1, instruction: 1, assessment: 1 }
+
+# How many leaf units two nodes of the tree have in common. This is what lets a
+# branch commitment cost the right amount: assigning one to operations engages
+# both its units, so it consumes two unit-periods, and it shows up in the load
+# of every node that shares a unit with it.
+#
+# It is derivable from unit_covers and is_leaf, and the rules below could count
+# the shared leaves themselves. Stating it as a table instead keeps a term for
+# each pair of units rather than one for each pair and every leaf between them,
+# which is the difference between a model that flattens in seconds and one that
+# does not on a real organisation. Same model either way; only the cost of
+# building it differs.
+param unit_overlap[Units, Units] default 0 = {
+    (organisation, organisation): 4, (organisation, operations): 2, (organisation, training): 2, (organisation, ops_north): 1,
+    (organisation, ops_south): 1, (organisation, instruction): 1, (organisation, assessment): 1, (operations, organisation): 2,
+    (operations, operations): 2, (operations, ops_north): 1, (operations, ops_south): 1, (training, organisation): 2,
+    (training, training): 2, (training, instruction): 1, (training, assessment): 1, (ops_north, organisation): 1,
+    (ops_north, operations): 1, (ops_north, ops_north): 1, (ops_south, organisation): 1, (ops_south, operations): 1,
+    (ops_south, ops_south): 1, (instruction, organisation): 1, (instruction, training): 1, (instruction, instruction): 1,
+    (assessment, organisation): 1, (assessment, training): 1, (assessment, assessment): 1 }
 
 # A node of the time tree is a contiguous range of periods. That is the whole
 # of what a level is, so one rule governs a day, a week and the horizon alike.
@@ -98,97 +121,106 @@ param node_depth[TimeNodes] default 0 "Depth in the period tree" = {
 # ------------------------------------------------------------- commitments
 
 param weight[Commitments] "What fulfilling it is worth" = {
-    patrol: 100, inspection: 80, drill: 60,
+    all_hands: 50, joint_exercise: 85, patrol: 100, inspection: 80, drill: 60,
     course_a: 90, course_b: 40, review: 30, audit: 20 }
 
 param mandatory[Commitments] default 0 "1 when it cannot be dropped" = {
-    patrol: 1, inspection: 1, course_a: 1 }
+    all_hands: 1, patrol: 1, inspection: 1, course_a: 1 }
 
-param sessions[Commitments] "Periods it needs over the horizon" = {
-    patrol: 6, inspection: 4, drill: 2,
+param sessions[Commitments] "Periods of calendar time it needs" = {
+    all_hands: 1, joint_exercise: 2, patrol: 6, inspection: 4, drill: 2,
     course_a: 4, course_b: 2, review: 2, audit: 2 }
 
+# Assignment at any level: all_hands belongs to the organisation, the joint
+# exercise to the operations branch, the rest to individual units.
 param assigned[Commitments, Units] default 0 "1 when the unit may take it" = {
+    (all_hands, organisation): 1,
+    (joint_exercise, operations): 1,
     (patrol, ops_north): 1, (patrol, ops_south): 1,
     (inspection, ops_north): 1, (inspection, ops_south): 1,
     (drill, ops_north): 1, (drill, ops_south): 1,
     (course_a, instruction): 1, (course_b, instruction): 1,
     (review, assessment): 1, (audit, assessment): 1 }
 
+# A commitment may draw on an interior capability as readily as on a craft.
 param needs[Commitments, Specialties] default 0 = {
+    (all_hands, capability): 1, (joint_exercise, field): 1,
     (patrol, mounted): 1, (inspection, dismounted): 1, (drill, dismounted): 1,
     (course_a, teaching): 1, (course_b, teaching): 1,
     (review, examining): 1, (audit, examining): 1 }
 
-# Frequency is a rollup, not a total: patrol is three times a week, because six
-# in one week and none in the next is not a fortnight of patrolling.
-param required_in[Commitments, TimeNodes] default 0 = {
+param required_in[Commitments, TimeNodes] default 0
+  "Frequency is a rollup, not a total: three patrols a week, not six whenever" = {
     (patrol, week_1): 3, (patrol, week_2): 3,
     (inspection, week_1): 2, (inspection, week_2): 2,
-    (course_a, week_1): 2, (course_a, week_2): 2 }
+    (course_a, week_1): 2, (course_a, week_2): 2,
+    (course_a, w1_mon): 2 }
 
 # ------------------------------------------------------------ availability
 
-# Declared wherever it belongs in the unit tree. Blocking a parent blocks
-# everything beneath it, through the rule below rather than by copying the
-# entry down to each child.
 param available[Units, Periods] default 1 "1 when the unit may be committed" = {
     (operations, 0): 0, (operations, 1): 0,
-    (training, 18): 0, (training, 19): 0 }
+    (assessment, 18): 0, (assessment, 19): 0 }
 
-# Allowance at every node of both the unit tree and the time tree. A parent
-# that cannot afford the sum of its children is what makes the unit rollup
-# more than reporting.
-param allowance[Units, TimeNodes] default 99 "Periods a unit may spend under a node" = {
-    (organisation, horizon): 18,
-    (operations, horizon): 12, (training, horizon): 7,
-    (ops_north, horizon): 9, (ops_south, horizon): 7,
-    (instruction, horizon): 5, (assessment, horizon): 3,
-    (operations, week_1): 6, (operations, week_2): 6,
-    (training, week_1): 4, (training, week_2): 4,
-    (ops_north, week_1): 5, (ops_north, week_2): 5,
-    (ops_south, week_1): 4, (ops_south, week_2): 4,
-    (instruction, week_1): 3, (instruction, week_2): 3,
-    (assessment, week_1): 2, (assessment, week_2): 2 }
+# Allowance at every node of both the unit tree and the time tree, in
+# unit-periods — so a branch's allowance is directly comparable with the sum of
+# its children's, and a branch that cannot afford them constrains them.
+param allowance[Units, TimeNodes] default 999
+  "Unit-periods this part of the organisation may spend under a node" = {
+    (organisation, horizon): 26,
+    (operations, horizon): 18, (training, horizon): 8,
+    (ops_north, horizon): 10, (ops_south, horizon): 10,
+    (instruction, horizon): 6, (assessment, horizon): 4,
+    (organisation, week_1): 14, (organisation, week_2): 14,
+    (operations, week_1): 11, (operations, week_2): 11,
+    (training, week_1): 6, (training, week_2): 6 }
 
-param daily_allowance[Units] default 2 "Periods a leaf unit may spend in one day" = {
-    ops_north: 2, ops_south: 2, instruction: 2, assessment: 1 }
+param daily_allowance[Units] default 2 "Unit-periods a leaf spends in one day" = {
+    ops_north: 2, ops_south: 2, instruction: 2, assessment: 2 }
 
 param specialty_capacity[Specialties] "Commitments of this capability at one moment" = {
-    capability: 3, field: 2, classroom: 2,
+    capability: 2, field: 2, classroom: 2,
     mounted: 1, dismounted: 1, teaching: 1, examining: 1 }
 
 # --------------------------------------------------------------- decisions
 
 var allocate[Commitments, Units, Periods] binary
-  means "Spend this unit's period on this commitment"
+  means "Run this commitment at this level of the organisation, in this period"
 
 var met[Commitments] binary
   means "Deliver this commitment in full"
 
-# The rollup: time spent under each node of the unit tree, in each node of the
-# period tree. Both hierarchies at once, in one variable — so utilisation is
-# reported at every level of both, and any rule can be stated against it.
-var load[Units, TimeNodes] continuous in [0, 99]
-  means "Periods this unit and everything under it spend in this part of the horizon"
+var load[Units, TimeNodes] continuous in [0, 999]
+  means "Unit-periods this part of the organisation spends in this part of the horizon"
 
-var busiest continuous in [0, 99] "Periods spent by the most loaded leaf unit"
-var idlest continuous in [0, 99] "Periods spent by the least loaded leaf unit"
+var busiest continuous in [0, 999] "Unit-periods spent by the most loaded unit"
+var idlest continuous in [0, 999] "Unit-periods spent by the least loaded unit"
 
 # -------------------------------------------------------------- hard rules
 
-constraint rollup "Load under a unit is the time it and everything beneath it "
-                  "spend in the periods the node covers"
+constraint rollup "Load under a node is the unit-periods spent there, counting a "
+                  "branch commitment against every unit it engages"
   category modelling
-  because "One rule rolls both trees up at once: a unit covers its descendants, "
-          "a time node covers its periods"
+  because "A commitment on a branch occupies each unit beneath it, so it costs "
+          "one period from each — which is what makes a parent's load equal to "
+          "its children's added together"
   forall u in Units, n in TimeNodes:
-    load[u, n] == sum(allocate[c, u2, p] for c in Commitments, u2 in Units, p in Periods
-                      where unit_covers[u, u2] == 1
+    load[u, n] == sum(unit_overlap[u, u2] * allocate[c, u2, p]
+                      for c in Commitments, u2 in Units, p in Periods
+                      where unit_overlap[u, u2] > 0
                         and p >= first_period[n] and p <= last_period[n])
 
-constraint allowance_at_every_level "No unit exceeds its allowance at any level of "
-                                    "either the organisation or the horizon"
+constraint one_thing_at_a_time "A unit does one thing in a period, whether the "
+                               "commitment is its own or one it inherits from above"
+  category physical
+  because "A joint exercise at the branch leaves no room for a unit beneath it to "
+          "be doing something else"
+  forall u in Units, p in Periods where is_leaf[u] == 1:
+    sum(allocate[c, u2, p] for c in Commitments, u2 in Units
+        where unit_covers[u2, u] == 1) <= 1
+
+constraint allowance_at_every_level "No part of the organisation exceeds its "
+                                    "allowance at any level of the horizon"
   category physical
   because "A parent that cannot afford the sum of its children constrains them, "
           "even where each child would fit on its own"
@@ -219,25 +251,20 @@ constraint mandatory_commitments_are_met "Mandatory commitments cannot be droppe
   forall c in Commitments where mandatory[c] == 1:
     met[c] >= 1
 
-constraint only_assigned_units "Only a unit the commitment is assigned to may carry it"
+constraint only_assigned_units "A commitment runs only at a level it is assigned to"
   category policy
-  because "Interior units of the tree are assigned nothing, so the work lands on "
-          "the leaves and rolls up from there"
+  because "The level a commitment is booked at is a decision about who owns it, "
+          "not a decision the plan is free to make"
   sum(allocate[c, u, p] for c in Commitments, u in Units, p in Periods
       where assigned[c, u] == 0) == 0
 
-constraint respect_availability "Nothing is committed when the unit, or any unit "
-                                "above it, is unavailable"
+constraint respect_availability "Nothing runs when any unit it engages is unavailable"
   category physical
-  because "A parent's reserved time blocks its children through the tree, rather "
-          "than by copying the entry down to each of them"
+  because "A commitment at a branch needs every unit beneath it, and a unit is also "
+          "stopped by anything reserved above it — so the block travels both ways "
+          "along the path"
   sum(allocate[c, u, p] for c in Commitments, u in Units, p in Periods, a in Units
-      where unit_covers[a, u] == 1 and available[a, p] == 0) == 0
-
-constraint one_thing_at_a_time "A unit does one thing in a period"
-  category physical
-  forall u in Units, p in Periods where is_leaf[u] == 1:
-    sum(allocate[c, u, p] for c in Commitments) <= 1
+      where unit_overlap[a, u] > 0 and available[a, p] == 0) == 0
 
 constraint specialty_capacity_at_every_level "A capability is not oversubscribed at "
                                              "any level of the specialty tree"
@@ -266,7 +293,7 @@ maximize commitment_coverage "Deliver as much weighted commitment as possible"
   weight 10:
   sum(weight[c] * met[c] for c in Commitments)
 
-minimize load_spread "Keep the leaf units evenly loaded" unit "periods" weight 1:
+minimize load_spread "Keep the units evenly loaded" unit "unit-periods" weight 1:
   busiest - idlest
 
 # ------------------------------------------------------------- assumptions
@@ -275,11 +302,18 @@ assume commitments_are_all_or_nothing "A commitment is delivered in full or not 
   because "Partial delivery is modelled as failure, so coverage means what it says"
   affects deliver_in_full, commitment_coverage
 
-assume work_lands_on_the_leaves "Only leaf units carry commitments; interior units "
-                                "hold the totals of everything beneath them"
-  because "A department does not teach a class — its sections do, and the department "
-          "is what their time adds up to"
-  affects only_assigned_units, rollup
+assume a_branch_commitment_engages_everything_beneath_it "A commitment assigned to a "
+                                                         "branch occupies every unit "
+                                                         "under it"
+  because "A joint exercise is not a thing the branch does instead of its units; it "
+          "is a thing they all do together, so it costs each of them the period"
+  affects rollup, one_thing_at_a_time, respect_availability
+
+assume time_is_counted_in_unit_periods "Load is measured in unit-periods, so one "
+                                       "period of a two-unit branch costs two"
+  because "It is the only measure in which a parent's load equals its children's "
+          "added together, whatever level the commitments were assigned at"
+  affects rollup, allowance_at_every_level
 
 assume a_level_is_a_set_that_rolls_up "A level of any of the three trees is a set of "
                                       "things that aggregate into it"
@@ -301,24 +335,37 @@ assume weights_are_comparable "Weights across commitments are on one scale"
 
 scenario surge "Operations cut by a sixth"
   "A competing tasking takes a sixth of the operations branch. The cut is made "
-  "once, at the branch, and reaches both units beneath it through the tree — "
-  "neither leaf allowance is touched, and both still bind above the new total."
+  "once, at the branch, and reaches both units beneath it through the tree."
   scale allowance[operations, horizon] by 0.85
   scale allowance[operations, week_1] by 0.85
   scale allowance[operations, week_2] by 0.85
 
-scenario invest "More room for training"
+scenario invest "More room across the organisation"
   "The planning question in reverse: what would it take to cover everything?"
-  set allowance[organisation, horizon] to 24
-  set allowance[training, horizon] to 11
-  set allowance[training, week_1] to 6
-  set allowance[training, week_2] to 6
-  set allowance[instruction, horizon] to 7
-  set allowance[instruction, week_1] to 4
-  set allowance[instruction, week_2] to 4
-  set allowance[assessment, horizon] to 5
-  set allowance[assessment, week_1] to 3
-  set allowance[assessment, week_2] to 3
+  set allowance[organisation, horizon] to 34
+  set allowance[organisation, week_1] to 20
+  set allowance[organisation, week_2] to 20
+  set allowance[training, horizon] to 14
+  set allowance[training, week_1] to 8
+  set allowance[training, week_2] to 8
+  set allowance[instruction, horizon] to 8
+  set allowance[assessment, horizon] to 6
+
+scenario assessment_stood_down "The smallest unit is away for a week"
+  "One leaf unit is unavailable for the whole of week 1. It pushes the "
+  "organisation's own commitment into week 2, because a commitment booked "
+  "above a unit still needs that unit in the room — which is how availability "
+  "travels up the tree as well as down it."
+  set available[assessment, 0] to 0
+  set available[assessment, 1] to 0
+  set available[assessment, 2] to 0
+  set available[assessment, 3] to 0
+  set available[assessment, 4] to 0
+  set available[assessment, 5] to 0
+  set available[assessment, 6] to 0
+  set available[assessment, 7] to 0
+  set available[assessment, 8] to 0
+  set available[assessment, 9] to 0
 
 scenario serialised_organisation "One commitment anywhere at a time"
   "The capability at the root of the specialty tree is cut to one, so nothing runs "

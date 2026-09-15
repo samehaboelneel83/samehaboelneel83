@@ -118,6 +118,24 @@ the composite. The server computes which one applies; the UI does not guess.
 
 ---
 
+### Hierarchies are precomputed relations, not expressions over the tree
+
+A model that spans a hierarchy needs to know which nodes cover which, and how
+much two of them overlap. Both are derivable from the parent links, and a rule
+can be written to derive them inline — the compiler flattens either form to the
+same rows. But deriving `overlap` inline puts a leaf loop inside every rule that
+mentions two units, so the terms enumerated go from one per pair of units to one
+per pair and every leaf between them. On the seven-unit example that is three
+seconds of flattening; on a real organisation it is the difference between a
+model that builds and one that does not.
+
+So a hierarchy enters a problem as tables — `covers` for ancestor-or-self,
+`overlap` for shared leaves — and the rules read them. They are derived data and
+a tool should generate them, which is exactly what the templates do; the
+language accepts them as ordinary parameters and stays out of it.
+
+---
+
 ### Portable JSON in the ORM, PostgreSQL features in migrations
 
 Modelling JSONB, ltree and PostGIS directly in the ORM would make PostgreSQL a
