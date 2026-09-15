@@ -331,9 +331,9 @@ def test_the_commitment_planning_example_is_a_working_model():
 
 
 def test_the_commitment_example_rolls_time_up_through_its_tree():
-    """A node of the period tree is a range of periods, and one rule rolls every
-    level up through it. The reported load must agree with the allocations, at
-    the horizon, the week and the day alike."""
+    """The time tree decomposes: the horizon is its weeks, and a week is its
+    days. Checked on every unit, including the branches — which is the half the
+    unit-tree test does not cover."""
     spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
     compiled = compile_and_flatten(spec)
     result, _ = run_solver(compiled.flat, options=OPTIONS)
@@ -342,43 +342,146 @@ def test_the_commitment_example_rolls_time_up_through_its_tree():
 
     first = {v.index[0]: v.value for v in spec.parameter("first_period").values}
     last = {v.index[0]: v.value for v in spec.parameter("last_period").values}
+    load = {
+        (d.index[0], d.index[1]): d.value
+        for d in solution.decisions if d.variable == "load"
+    }
+    nodes = compiled.ir.set("TimeNodes").elements
+    weeks = [n for n in nodes if n.startswith("week_")]
+    assert weeks, "the example has no weeks, so there is no rollup to check"
+
+    for unit in compiled.ir.set("Units").elements:
+        assert load.get((unit, "horizon"), 0.0) == pytest.approx(
+            sum(load.get((unit, w), 0.0) for w in weeks)
+        ), unit
+        for week in weeks:
+            days = [
+                n for n in nodes
+                if n not in weeks and n != "horizon"
+                and first[n] >= first[week] and last[n] <= last[week]
+            ]
+            assert days, week
+            assert load.get((unit, week), 0.0) == pytest.approx(
+                sum(load.get((unit, d), 0.0) for d in days)
+            ), (unit, week)
+
+
+def test_load_rolls_up_the_unit_tree_as_well_as_the_horizon():
+    """One rule aggregates both trees at once: a unit covers its descendants, a
+    time node covers its periods. A parent's reported load must be its children's,
+    at every node of the horizon."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    assert result.status == SolveStatus.OPTIMAL
+    solution = build_solution(compiled, result)
+
+    covers = {tuple(v.index) for v in spec.parameter("unit_covers").values if v.value == 1}
+    first = {v.index[0]: v.value for v in spec.parameter("first_period").values}
+    last = {v.index[0]: v.value for v in spec.parameter("last_period").values}
     allowance = spec.parameter("allowance")
     limit = {tuple(v.index): v.value for v in allowance.values}
 
     allocated = [
-        (d.index[0], d.index[1], int(d.index[2]))
+        (d.index[1], int(d.index[2]))
         for d in solution.decisions if d.variable == "allocate"
     ]
-    reported = {
+    load = {
+        (d.index[0], d.index[1]): d.value
+        for d in solution.decisions if d.variable == "load"
+    }
+    nodes = compiled.ir.set("TimeNodes").elements
+
+    # Reported load agrees with the allocations, for interior units too.
+    for unit in compiled.ir.set("Units").elements:
+        for node in nodes:
+            actual = sum(
+                1 for u, p in allocated
+                if (unit, u) in covers and first[node] <= p <= last[node]
+            )
+            assert load.get((unit, node), 0.0) == pytest.approx(actual), (unit, node)
+            assert actual <= limit.get((unit, node), allowance.default) + 1e-6
+
+    # A parent is exactly its children, everywhere in the horizon.
+    families = {
+        "organisation": ["operations", "training"],
+        "operations": ["ops_north", "ops_south"],
+        "training": ["instruction", "assessment"],
+    }
+    for parent, children in families.items():
+        for node in nodes:
+            assert load.get((parent, node), 0.0) == pytest.approx(
+                sum(load.get((child, node), 0.0) for child in children)
+            ), (parent, node)
+
+    # And the branch totals are real work, not zeros that trivially agree.
+    assert load[("organisation", "horizon")] > 0
+
+
+def test_an_interior_unit_allowance_binds_on_its_children():
+    """The reason to roll the unit tree up: a branch that cannot afford the sum
+    of its children constrains them, even where each child would fit alone."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    solution = build_solution(compiled, result)
+
+    limit = {tuple(v.index): v.value for v in spec.parameter("allowance").values}
+    leaves = {v.index[0] for v in spec.parameter("is_leaf").values if v.value == 1}
+    load = {
         (d.index[0], d.index[1]): d.value
         for d in solution.decisions if d.variable == "load"
     }
 
-    nodes = compiled.ir.set("TimeNodes").elements
-    units = compiled.ir.set("Units").elements
-    for unit in units:
-        for node in nodes:
-            actual = sum(
-                1 for _, u, p in allocated
-                if u == unit and first[node] <= p <= last[node]
-            )
-            assert reported.get((unit, node), 0.0) == pytest.approx(actual), (unit, node)
-            assert actual <= limit.get((unit, node), allowance.default) + 1e-6
+    # The branch caps really are tighter than their children added together,
+    # or the rollup would be reporting rather than constraining.
+    for parent, children in (("operations", ["ops_north", "ops_south"]),
+                             ("training", ["instruction", "assessment"])):
+        assert limit[(parent, "horizon")] < sum(limit[(c, "horizon")] for c in children)
 
-    # The rollup has to be a rollup: a week is its days, the horizon its weeks.
-    for unit in units:
-        weeks = [n for n in nodes if n.startswith("week_")]
-        assert reported.get((unit, "horizon"), 0.0) == pytest.approx(
-            sum(reported.get((unit, w), 0.0) for w in weeks)
-        )
-        for week in weeks:
-            days = [
-                n for n in nodes
-                if first[n] >= first[week] and last[n] <= last[week] and n != week
-            ]
-            assert reported.get((unit, week), 0.0) == pytest.approx(
-                sum(reported.get((unit, d), 0.0) for d in days)
-            )
+    binding = {
+        outcome.index[0] for outcome in solution.binding_constraints
+        if outcome.name == "allowance_at_every_level"
+    }
+    interior = binding - leaves
+    assert interior, f"only leaf allowances bound: {sorted(binding)}"
+    assert "organisation" in interior, "the root allowance never bound"
+    assert load[("organisation", "horizon")] == pytest.approx(
+        limit[("organisation", "horizon")]
+    )
+
+
+def test_a_parent_unit_blocks_its_children_through_the_tree():
+    """Availability is declared where it belongs and reaches downwards, rather
+    than being copied onto every child before solving."""
+    spec = parse_problem((EXAMPLES / "commitment_planning.psp").read_text())
+    covers = {tuple(v.index) for v in spec.parameter("unit_covers").values if v.value == 1}
+    blocked = {
+        (v.index[0], int(v.index[1]))
+        for v in spec.parameter("available").values if v.value == 0
+    }
+    # The example declares this on branches, not leaves — otherwise the tree is
+    # doing no work here.
+    leaves = {v.index[0] for v in spec.parameter("is_leaf").values if v.value == 1}
+    assert blocked and not {unit for unit, _ in blocked} & leaves
+
+    compiled = compile_and_flatten(spec)
+    result, _ = run_solver(compiled.flat, options=OPTIONS)
+    solution = build_solution(compiled, result)
+    allocated = [
+        (d.index[0], d.index[1], int(d.index[2]))
+        for d in solution.decisions if d.variable == "allocate"
+    ]
+
+    for _, unit, period in allocated:
+        for branch, at in blocked:
+            assert not ((branch, unit) in covers and at == period), (branch, unit, period)
+
+    # A sibling branch is untouched, so the block reached its own children and
+    # stopped there rather than blocking the period outright.
+    blocked_periods = {at for _, at in blocked}
+    elsewhere = [a for a in allocated if a[2] in blocked_periods]
+    assert elsewhere, "nothing ran in those periods, so nothing is demonstrated"
 
 
 def test_frequency_is_met_inside_each_node_not_merely_in_total():
