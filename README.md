@@ -94,3 +94,11 @@ already carry what an OpenLineage exporter would need.
 
 React · FastAPI · PostgreSQL (JSONB, ltree, PostGIS) · Keycloak · OR-Tools
 CP-SAT · HiGHS · NetworkX · SimPy
+
+## Problem templates
+
+`resource_allocation` · `assignment` · `scheduling` · `transportation` ·
+`vehicle_routing` · `lecture_timetabling`
+
+Each carries its constraints *and* its assumptions, so an operator who never
+opens a solver still sees what the encoding committed them to.

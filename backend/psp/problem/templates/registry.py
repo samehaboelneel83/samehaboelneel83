@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from psp.problem.templates.assignment import AssignmentTemplate
 from psp.problem.templates.base import ProblemTemplate
+from psp.problem.templates.lecture_timetabling import LectureTimetablingTemplate
 from psp.problem.templates.resource_allocation import ResourceAllocationTemplate
 from psp.problem.templates.scheduling import SchedulingTemplate
 from psp.problem.templates.transportation import TransportationTemplate
@@ -17,6 +18,7 @@ _TEMPLATES: dict[str, ProblemTemplate] = {
         SchedulingTemplate(),
         TransportationTemplate(),
         VehicleRoutingTemplate(),
+        LectureTimetablingTemplate(),
     )
 }
 

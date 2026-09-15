@@ -27,7 +27,7 @@ def test_templates_are_listed_with_their_inputs(client):
     keys = {t["key"] for t in body["templates"]}
     assert keys == {
         "resource_allocation", "assignment", "scheduling",
-        "transportation", "vehicle_routing",
+        "transportation", "vehicle_routing", "lecture_timetabling",
     }
     for template in body["templates"]:
         assert template["inputs"], f"{template['key']} documents no inputs"
