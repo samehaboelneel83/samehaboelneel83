@@ -63,6 +63,9 @@ curl -sX POST localhost:8000/api/problems/fuel/solve -d '{"solver":"highs"}' -H 
 Step 3 solves it with network simplex and step 4 with a MIP engine. The answers
 match, and the problem model never changed. That is what the IR is for.
 
+The same walk through the interface, screen by screen, is in
+[`docs/screenshots/`](docs/screenshots/README.md).
+
 ## Architecture
 
 | Layer | What it holds | Depends on |
