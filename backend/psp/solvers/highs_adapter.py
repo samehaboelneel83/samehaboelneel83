@@ -29,7 +29,10 @@ class HighsAdapter(SolverAdapter):
     engine = "HiGHS"
 
     def capabilities(self) -> Capabilities:
-        return Capabilities(continuous=True, integer=True, binary=True, duals=True)
+        return Capabilities(
+            continuous=True, integer=True, binary=True, duals=True,
+            quadratic_objective=True, requires_convex_quadratic=True,
+        )
 
     def solve(self, model: FlatModel, options: SolveOptions) -> SolveResult:
         import highspy
@@ -95,6 +98,9 @@ class HighsAdapter(SolverAdapter):
         if model.objective.constant:
             h.changeObjectiveOffset(float(model.objective.constant))
 
+        if model.objective.quadratic:
+            h.passHessian(_build_hessian(highspy, model, col_of, n))
+
         started = time.perf_counter()
         h.run()
         elapsed = time.perf_counter() - started
@@ -127,3 +133,42 @@ class HighsAdapter(SolverAdapter):
                 c.key: float(solution.row_dual[i]) for i, c in enumerate(model.constraints)
             }
         return result
+
+
+
+def _build_hessian(highspy, model: FlatModel, col_of: dict[str, int], n: int):
+    """The objective's degree-two part, as the Hessian HiGHS expects.
+
+    HiGHS minimises ``0.5 x'Hx + c'x``, so a ``c*x*x`` term is ``H[x][x] = 2c``
+    while a ``c*x*y`` term is ``H[x][y] = H[y][x] = c``. Getting that factor
+    wrong does not fail — it silently solves a different problem — so it is
+    written once here and checked by a test that knows the answer by hand.
+
+    The format is the lower triangle in column-major order.
+    """
+    by_column: dict[int, dict[int, float]] = {}
+    for term in model.objective.quadratic:
+        a, b = col_of[term.i], col_of[term.j]
+        if a == b:
+            by_column.setdefault(a, {})[a] = by_column.get(a, {}).get(a, 0.0) + 2.0 * term.coef
+        else:
+            row, column = max(a, b), min(a, b)
+            by_column.setdefault(column, {})[row] = (
+                by_column.get(column, {}).get(row, 0.0) + term.coef
+            )
+
+    starts, indices, values = [], [], []
+    for column in range(n):
+        starts.append(len(indices))
+        for row in sorted(by_column.get(column, {})):
+            indices.append(row)
+            values.append(by_column[column][row])
+    starts.append(len(indices))
+
+    hessian = highspy.HighsHessian()
+    hessian.dim_ = n
+    hessian.format_ = highspy.HessianFormat.kTriangular
+    hessian.start_ = starts
+    hessian.index_ = indices
+    hessian.value_ = values
+    return hessian

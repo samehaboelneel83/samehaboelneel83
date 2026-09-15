@@ -4,6 +4,10 @@ The flat model is a plain linear system — variables with bounds, constraints
 as sparse rows, one objective. Every row keeps a ``source`` back-pointer to the
 IR constraint and the index tuple it came from, which is what makes an answer
 to "why is this decision what it is?" possible without an LLM.
+
+The one departure from linearity is the objective, which may carry degree-two
+terms. Rows never do: a quadratic constraint is a different class of problem,
+and refusing it keeps every row a sparse line a dual can be attached to.
 """
 
 from __future__ import annotations
@@ -36,11 +40,30 @@ class FlatConstraint(BaseModel):
     statement: str | None = None
 
 
+class QuadTerm(BaseModel):
+    """``coef * i * j``. ``i == j`` is a square; ``i < j`` a cross term, held
+    once rather than twice so the coefficient means the same thing either way."""
+
+    i: str
+    j: str
+    coef: float
+
+
 class FlatObjective(BaseModel):
     sense: Sense = "minimize"
     terms: dict[str, float] = Field(default_factory=dict)
+    quadratic: list[QuadTerm] = Field(default_factory=list)
     constant: float = 0.0
     components: list[dict] = Field(default_factory=list)
+    convex: bool | None = None
+    """Whether the composite objective is convex as a minimisation. ``None``
+    when there is nothing quadratic to ask the question about. Decided at
+    compile time because an engine that cannot take a non-convex objective
+    should say so before it runs, not fail obscurely inside one."""
+
+    @property
+    def is_quadratic(self) -> bool:
+        return bool(self.quadratic)
 
 
 class FlatModel(BaseModel):
@@ -61,10 +84,15 @@ class FlatModel(BaseModel):
         kinds: dict[str, int] = {}
         for v in self.variables:
             kinds[v.kind] = kinds.get(v.kind, 0) + 1
-        return {
+        stats = {
             "variables": len(self.variables),
             "constraints": len(self.constraints),
             "nonzeros": sum(len(c.terms) for c in self.constraints),
             "variable_kinds": kinds,
             "is_integer": any(v.kind in ("binary", "integer") for v in self.variables),
+            "is_quadratic": self.objective.is_quadratic,
         }
+        if self.objective.is_quadratic:
+            stats["quadratic_terms"] = len(self.objective.quadratic)
+            stats["objective_convex"] = self.objective.convex
+        return stats

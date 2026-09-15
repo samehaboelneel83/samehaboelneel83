@@ -1,10 +1,10 @@
 from psp.compiler.errors import CompileError, DomainError, NonLinearError, UnboundIndexError
-from psp.compiler.flat import FlatConstraint, FlatModel, FlatObjective, FlatVar
+from psp.compiler.flat import FlatConstraint, FlatModel, FlatObjective, FlatVar, QuadTerm
 from psp.compiler.flatten import flatten
 
 __all__ = [
     "CompileError", "DomainError", "NonLinearError", "UnboundIndexError",
-    "FlatConstraint", "FlatModel", "FlatObjective", "FlatVar", "flatten",
+    "FlatConstraint", "FlatModel", "FlatObjective", "FlatVar", "QuadTerm", "flatten",
 ]
 from psp.compiler.pipeline import CompiledProblem, compile_and_flatten
 from psp.compiler.problem_compiler import CompilationRecord, Mapping, compile_problem

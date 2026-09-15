@@ -68,6 +68,9 @@ export interface ModelStatistics {
   nonzeros: number;
   variable_kinds: Record<string, number>;
   is_integer: boolean;
+  is_quadratic: boolean;
+  quadratic_terms?: number;
+  objective_convex?: boolean | null;
 }
 
 export interface CompileResponse {

@@ -108,7 +108,10 @@ export default function ModelPage({
               <Stat label="Non-zeros" value={num(compiled.statistics.nonzeros)} note="matrix density" />
               <Stat
                 label="Kind"
-                value={compiled.statistics.is_integer ? "Discrete" : "Continuous"}
+                value={
+                  (compiled.statistics.is_integer ? "Discrete" : "Continuous") +
+                  (compiled.statistics.is_quadratic ? ", quadratic" : "")
+                }
                 note={Object.entries(compiled.statistics.variable_kinds)
                   .map(([k, v]) => `${v} ${k}`)
                   .join(", ")}
@@ -242,6 +245,20 @@ function eligibility(
 ): { ok: boolean; reason: string | null } {
   const caps = solver.capabilities;
   const kinds = compiled.statistics.variable_kinds;
+  const discrete = (kinds.integer ?? 0) > 0 || (kinds.binary ?? 0) > 0;
+  if (compiled.statistics.is_quadratic) {
+    if (caps.quadratic_objective !== true) {
+      return { ok: false, reason: "takes a linear objective only" };
+    }
+    if (caps.requires_convex_quadratic === true) {
+      if (discrete) {
+        return { ok: false, reason: "has no mixed-integer quadratic mode" };
+      }
+      if (compiled.statistics.objective_convex === false) {
+        return { ok: false, reason: "this quadratic objective is not convex" };
+      }
+    }
+  }
   if ((kinds.continuous ?? 0) > 0 && caps.continuous === false) {
     return { ok: false, reason: "needs a fully discrete model" };
   }

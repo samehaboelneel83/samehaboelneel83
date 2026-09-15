@@ -46,6 +46,7 @@ def test_flatten_produces_sparse_rows():
     assert flat.stats() == {
         "variables": 2, "constraints": 1, "nonzeros": 2,
         "variable_kinds": {"continuous": 2}, "is_integer": False,
+        "is_quadratic": False,
     }
     row = flat.constraints[0]
     assert row.terms == {"x[a]": 1.0, "x[b]": 1.0}

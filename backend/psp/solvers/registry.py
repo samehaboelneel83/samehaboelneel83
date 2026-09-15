@@ -18,14 +18,17 @@ _REGISTRY: dict[str, tuple[str, str, Capabilities]] = {
     "highs": (
         "psp.solvers.highs_adapter",
         "HighsAdapter",
-        Capabilities(continuous=True, integer=True, binary=True, duals=True),
+        Capabilities(
+            continuous=True, integer=True, binary=True, duals=True,
+            quadratic_objective=True, requires_convex_quadratic=True,
+        ),
     ),
     "cpsat": (
         "psp.solvers.cpsat_adapter",
         "CpSatAdapter",
         Capabilities(
             continuous=False, integer=True, binary=True, duals=False,
-            requires_bounded_integers=True,
+            quadratic_objective=True, requires_bounded_integers=True,
         ),
     ),
     "networkx": (

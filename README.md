@@ -128,6 +128,29 @@ Every built-in template can be read back as source (`GET /api/dsl/templates/{key
 which is the fastest way to learn the language — and there is a test asserting
 all six survive the round trip with an identical model fingerprint.
 
+### Quadratic objectives
+
+An objective may multiply two decisions. Nothing else may:
+
+```
+minimize imbalance "Spread of team loads about their mean" unit "hours squared":
+  sum((load[t] - mean_load) * (load[t] - mean_load) for t in Teams)
+```
+
+That is the honest way to say "balanced", and it is why the language has it: a
+range — the busiest minus the idlest — is the linear stand-in, and it cannot
+tell one overloaded team from three so long as the extremes match.
+
+The compiler folds the product into degree-two terms, decides whether the
+result is convex, and the engine follows from that: HiGHS minimises a convex
+quadratic over a continuous model, CP-SAT builds a variable per product over a
+discrete one. A quadratic over *both* kinds of variable has no engine here and
+is refused by name, as is a product of decisions inside a constraint, where a
+row has to stay a line a shadow price can be attached to.
+
+`examples/balanced_workload.psp` is the worked example, and its answers are
+checked against ones computed by hand.
+
 ## Problem templates
 
 `resource_allocation` · `assignment` · `scheduling` · `transportation` ·

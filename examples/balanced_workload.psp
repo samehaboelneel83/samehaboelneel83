@@ -1,0 +1,90 @@
+# Balancing work across teams, with a quadratic objective.
+#
+# The point of this file is the objective. Every other model in this repository
+# measures imbalance as a range — the busiest team minus the idlest — because
+# that is the linear measure of the idea. A range is blind to everything in the
+# middle: it cannot tell three even teams and one overloaded one from one even
+# team and three overloaded ones, as long as the extremes match.
+#
+# The honest measure is the spread about the mean, and it is quadratic. It is
+# written here the way it is meant:
+#
+#     minimize sum((load[t] - mean) * (load[t] - mean) for t in Teams)
+#
+# A product of two decisions is allowed in an objective and nowhere else. The
+# compiler folds it into degree-two terms, decides whether the result is convex,
+# and the engine is chosen from that: HiGHS minimises it directly as a convex
+# quadratic when the model is continuous, and CP-SAT builds a variable per
+# product when the model is discrete. Neither is asked to do the other's job.
+
+problem balanced_workload "Balanced workload"
+  "Spread a fixed body of work across teams so that no team carries a share "
+  "far from the average, while respecting what each team can take."
+
+set Teams = alpha, bravo, charlie, delta of team
+
+param capacity[Teams] "Hours this team can take" = {
+    alpha: 40, bravo: 40, charlie: 25, delta: 25 }
+
+param minimum[Teams] default 0 "Hours this team is committed to regardless" = {
+    alpha: 12, charlie: 5 }
+
+param total_work "Hours to be shared out" = 96
+
+# ------------------------------------------------------------- decisions
+
+var load[Teams] continuous in [0, 40] means "Hours this team is given"
+
+var mean_load continuous in [0, 40] means "Average hours across the teams"
+
+# ------------------------------------------------------------ hard rules
+
+constraint all_work_is_shared_out "Every hour of work is given to some team"
+  category physical
+  sum(load[t] for t in Teams) == total_work
+
+constraint within_capacity "No team is given more than it can take"
+  category physical
+  forall t in Teams:
+    load[t] <= capacity[t]
+
+constraint standing_commitments_are_kept "A team already committed keeps its hours"
+  category operational
+  forall t in Teams where minimum[t] > 0:
+    load[t] >= minimum[t]
+
+constraint mean_is_the_average "The mean is the average of the loads"
+  category modelling
+  because "Stating it as a decision rather than a constant lets the spread be "
+          "measured about the average the plan actually produces"
+  4 * mean_load == sum(load[t] for t in Teams)
+
+# -------------------------------------------------------------- objective
+
+minimize imbalance "Spread of team loads about their mean"
+  unit "hours squared":
+  sum((load[t] - mean_load) * (load[t] - mean_load) for t in Teams)
+
+# ------------------------------------------------------------ assumptions
+
+assume balance_is_a_variance "Balance is the spread of loads about the mean, "
+                             "not the gap between the extremes"
+  because "A range cannot tell one overloaded team from three, so long as the "
+          "busiest and idlest match; the spread can"
+  affects imbalance, mean_is_the_average
+
+assume work_is_divisible "Work can be split into any fraction of an hour"
+  because "It is what keeps the model continuous, which is what lets the "
+          "quadratic be solved directly rather than searched over"
+  affects all_work_is_shared_out
+
+# -------------------------------------------------------------- scenarios
+
+scenario charlie_unavailable "Charlie's team is committed elsewhere"
+  "Their capacity drops to what they are already committed to, so the same work "
+  "has to be carried by three teams instead of four."
+  set capacity[charlie] to 5
+
+scenario more_work "A quarter more work, same teams"
+  "Capacity starts to bind, and a perfectly even split stops being reachable."
+  set total_work to 120

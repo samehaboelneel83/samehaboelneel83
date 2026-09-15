@@ -36,6 +36,10 @@ class Capabilities(BaseModel):
     integer: bool = False
     binary: bool = False
     duals: bool = False
+    quadratic_objective: bool = False
+    requires_convex_quadratic: bool = False
+    """Set where the engine minimises a quadratic by convex optimisation, so a
+    non-convex objective is not merely slow but meaningless to it."""
     requires_structure: str | None = None
     requires_bounded_integers: bool = False
 
@@ -76,6 +80,21 @@ class SolverAdapter:
         """Return (accepted, reason-if-not). Pure, cheap, no engine import."""
         caps = self.capabilities()
         kinds = {v.kind for v in model.variables}
+        if model.objective.is_quadratic:
+            if not caps.quadratic_objective:
+                return False, f"{self.name} takes a linear objective only"
+            if caps.requires_convex_quadratic:
+                if kinds & {"integer", "binary"}:
+                    return False, (
+                        f"{self.name} has no mixed-integer quadratic mode; a "
+                        "quadratic objective needs either a fully continuous "
+                        "model here or a fully discrete one for cpsat"
+                    )
+                if model.objective.convex is False:
+                    return False, (
+                        f"{self.name} minimises a quadratic objective only where it "
+                        "is convex, and this one is not"
+                    )
         if "integer" in kinds and not caps.integer:
             return False, f"{self.name} does not support integer variables"
         if "binary" in kinds and not caps.binary:

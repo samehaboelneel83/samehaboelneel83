@@ -3,8 +3,13 @@
 The compiler walks each expression once and folds it into an :class:`Affine`
 form — a constant plus a sparse map of variable keys to coefficients. Constants
 collapse eagerly, so by the time a constraint reaches a solver it is already a
-sparse row. A product whose factors both carry variables is rejected here
-rather than silently mis-solved.
+sparse row.
+
+Objectives are walked in a second algebra, :class:`Quadratic`, which carries
+degree-two terms as well. The walk is the same; only the multiplication rule
+differs, so there is one expression language and not two. Everywhere else a
+product whose factors both carry variables is rejected here rather than
+silently mis-solved.
 """
 
 from __future__ import annotations
@@ -51,6 +56,78 @@ class Affine:
         return self
 
 
+@dataclass
+class Quadratic:
+    """``constant + sum(coef * var) + sum(coef * var * var)``.
+
+    The algebra objectives are folded in. It is deliberately not the algebra
+    constraints use: a quadratic *row* is a different kind of problem from a
+    quadratic *objective*, and no engine behind this platform accepts one.
+    """
+
+    constant: float = 0.0
+    terms: dict[str, float] = field(default_factory=dict)
+    # Keyed by an ordered pair of variable keys, so ``x*y`` and ``y*x`` land on
+    # the same coefficient rather than becoming two terms that cancel badly.
+    quad: dict[tuple[str, str], float] = field(default_factory=dict)
+
+    @property
+    def is_constant(self) -> bool:
+        return not self.terms and not self.quad
+
+    @property
+    def is_affine(self) -> bool:
+        return not self.quad
+
+    def __add__(self, other: Quadratic) -> Quadratic:
+        out = Quadratic(self.constant + other.constant, dict(self.terms), dict(self.quad))
+        for k, v in other.terms.items():
+            out.terms[k] = out.terms.get(k, 0.0) + v
+        for k, v in other.quad.items():
+            out.quad[k] = out.quad.get(k, 0.0) + v
+        return out.prune()
+
+    def __neg__(self) -> Quadratic:
+        return Quadratic(
+            -self.constant,
+            {k: -v for k, v in self.terms.items()},
+            {k: -v for k, v in self.quad.items()},
+        )
+
+    def __sub__(self, other: Quadratic) -> Quadratic:
+        return self + (-other)
+
+    def scale(self, factor: float) -> Quadratic:
+        return Quadratic(
+            self.constant * factor,
+            {k: v * factor for k, v in self.terms.items()},
+            {k: v * factor for k, v in self.quad.items()},
+        ).prune()
+
+    def multiply(self, other: Quadratic) -> Quadratic:
+        """``self * other``, valid only while the result stays degree two."""
+        if self.quad or other.quad:
+            raise NonLinearError(
+                "product would be degree three or higher; an objective may be "
+                "quadratic, but no higher"
+            )
+        out = Quadratic(self.constant * other.constant)
+        for k, v in self.terms.items():
+            out.terms[k] = out.terms.get(k, 0.0) + v * other.constant
+        for k, v in other.terms.items():
+            out.terms[k] = out.terms.get(k, 0.0) + v * self.constant
+        for ka, va in self.terms.items():
+            for kb, vb in other.terms.items():
+                pair = (ka, kb) if ka <= kb else (kb, ka)
+                out.quad[pair] = out.quad.get(pair, 0.0) + va * vb
+        return out.prune()
+
+    def prune(self, eps: float = 1e-12) -> Quadratic:
+        self.terms = {k: v for k, v in self.terms.items() if abs(v) > eps}
+        self.quad = {k: v for k, v in self.quad.items() if abs(v) > eps}
+        return self
+
+
 def var_key(name: str, index: list[str]) -> str:
     return f"{name}[{','.join(index)}]" if index else name
 
@@ -89,12 +166,25 @@ class Evaluator:
             return aff
         return aff.constant
 
-    def affine(self, node, env: dict[str, tuple[str, str]], allow_vars: bool = True):
-        """Fold ``node`` into an :class:`Affine` (or a ``str`` for label values)."""
+    def affine(
+        self,
+        node,
+        env: dict[str, tuple[str, str]],
+        allow_vars: bool = True,
+        max_degree: int = 1,
+    ):
+        """Fold ``node`` into an :class:`Affine` (or a ``str`` for label values).
+
+        ``max_degree`` of 2 folds into a :class:`Quadratic` instead, which is
+        what objectives are evaluated with. The walk below is identical either
+        way — only ``mul`` behaves differently — so the constructor is chosen
+        once here and the degree-one path allocates exactly what it did before.
+        """
         op = node.op
+        cls = Quadratic if max_degree > 1 else Affine
 
         if op == "const":
-            return Affine(float(node.value))
+            return cls(float(node.value))
 
         if op == "lit":
             return node.value
@@ -105,7 +195,7 @@ class Evaluator:
                 raise UnboundIndexError(f"index '{node.name}' is not bound here")
             element, set_name = bound
             if self.is_int_set(set_name):
-                return Affine(float(int(element)))
+                return cls(float(int(element)))
             return element
 
         if op == "param":
@@ -114,7 +204,7 @@ class Evaluator:
             if param is None:
                 raise DomainError(f"unknown parameter '{node.name}'")
             self._check_arity(param.index_sets, idx, f"parameter '{node.name}'")
-            return Affine(param.get(tuple(idx)))
+            return cls(param.get(tuple(idx)))
 
         if op == "var":
             if not allow_vars:
@@ -136,45 +226,48 @@ class Evaluator:
             key = var_key(node.name, idx)
             if self._on_var is not None:
                 self._on_var(decl, idx, key)
-            return Affine(0.0, {key: 1.0})
+            return cls(0.0, {key: 1.0})
 
         if op == "neg":
-            return -self._num(self.affine(node.arg, env, allow_vars))
+            return -self._num(self.affine(node.arg, env, allow_vars, max_degree))
 
         if op == "add":
-            total = Affine()
+            total = cls()
             for a in node.args:
-                total = total + self._num(self.affine(a, env, allow_vars))
+                total = total + self._num(self.affine(a, env, allow_vars, max_degree))
             return total
 
         if op == "sub":
             if not node.args:
-                return Affine()
-            total = self._num(self.affine(node.args[0], env, allow_vars))
+                return cls()
+            total = self._num(self.affine(node.args[0], env, allow_vars, max_degree))
             for a in node.args[1:]:
-                total = total - self._num(self.affine(a, env, allow_vars))
+                total = total - self._num(self.affine(a, env, allow_vars, max_degree))
             return total
 
         if op == "mul":
-            product = Affine(1.0)
+            product = cls(1.0)
             for a in node.args:
-                factor = self._num(self.affine(a, env, allow_vars))
+                factor = self._num(self.affine(a, env, allow_vars, max_degree))
                 if product.is_constant:
                     product = factor.scale(product.constant)
                 elif factor.is_constant:
                     product = product.scale(factor.constant)
+                elif max_degree > 1:
+                    product = product.multiply(factor)
                 else:
                     raise NonLinearError(
                         "product of two expressions that both contain decision "
-                        "variables; the linear IR cannot represent it"
+                        "variables; a product of decisions is allowed in an "
+                        "objective, but a constraint row has to stay linear"
                     )
             return product
 
         if op == "div":
             if len(node.args) != 2:
                 raise NonLinearError("division takes exactly two operands")
-            num = self._num(self.affine(node.args[0], env, allow_vars))
-            den = self._num(self.affine(node.args[1], env, allow_vars))
+            num = self._num(self.affine(node.args[0], env, allow_vars, max_degree))
+            den = self._num(self.affine(node.args[1], env, allow_vars, max_degree))
             if not den.is_constant:
                 raise NonLinearError("division by an expression containing decision variables")
             if den.constant == 0:
@@ -182,9 +275,11 @@ class Evaluator:
             return num.scale(1.0 / den.constant)
 
         if op == "sum":
-            total = Affine()
+            total = cls()
             for binding_env in self.iterate(node.over, env, node.where):
-                total = total + self._num(self.affine(node.body, binding_env, allow_vars))
+                total = total + self._num(
+                    self.affine(node.body, binding_env, allow_vars, max_degree)
+                )
             return total
 
         raise DomainError(f"unsupported expression node '{op}'")

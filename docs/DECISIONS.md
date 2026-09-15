@@ -73,12 +73,54 @@ required to evaluate to a constant.
 
 ### Reject non-linear expressions instead of linearising them
 
-A product of two decision variables could be approximated. It is refused
-instead, by name, with the constraint that caused it.
+A product of two decision variables could be approximated. Outside an objective
+it is refused instead, by name, with the constraint that caused it.
 
 An automatic linearisation changes what the model means. A user who wrote a
 quadratic term and received a confident answer to a different question is worse
 off than one who received an error.
+
+---
+
+### A quadratic objective, but never a quadratic row
+
+Degree two is allowed in an objective and refused everywhere else.
+
+The reason is not squeamishness about non-linearity; it is that the two are
+different kinds of problem. A quadratic *objective* over a linear feasible
+region is still a convex program with a dual, so every row stays a sparse line a
+shadow price can be attached to and an explanation can cite. A quadratic *row*
+bends the feasible region, and the provenance chain — which explains a decision
+by naming the rows that bind on it and what one more unit of each would be
+worth — would be explaining something it no longer describes.
+
+So the boundary is drawn where the explanation stops being true, not where the
+mathematics stops being convenient. It also happens to be the boundary of what
+the engines here can do, which is a coincidence worth not relying on.
+
+---
+
+### Two mechanisms for degree two, chosen by capability
+
+A quadratic objective reaches an engine one of two ways. HiGHS takes a Hessian
+and minimises it as a convex program. CP-SAT takes an auxiliary variable per
+product, constrained to equal it, and searches. The model says nothing about
+which; the flat model carries degree-two terms and the registry picks.
+
+The consequence is a gap, and it is stated rather than hidden. HiGHS has no
+mixed-integer quadratic mode and CP-SAT needs a fully discrete model, so a
+quadratic objective over *both* continuous and discrete variables has no engine
+here. The refusal names both shapes that do work.
+
+Convexity is decided by the compiler, not discovered by the engine. HiGHS
+answers a non-convex quadratic with a bare error and no model status, which
+would surface as "solver error" long after the objective lost its name. The
+Hessian's smallest eigenvalue is checked while the objective is still called
+`imbalance`, and above a thousand quadratically-involved variables the answer
+becomes "not established" rather than a claim the compiler did not check.
+
+CP-SAT is not asked about convexity at all — nothing is being minimised by
+convex optimisation there, so a non-convex discrete objective is ordinary work.
 
 ---
 

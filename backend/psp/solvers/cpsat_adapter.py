@@ -26,7 +26,7 @@ class CpSatAdapter(SolverAdapter):
     def capabilities(self) -> Capabilities:
         return Capabilities(
             continuous=False, integer=True, binary=True, duals=False,
-            requires_bounded_integers=True,
+            quadratic_objective=True, requires_bounded_integers=True,
         )
 
     def solve(self, model: FlatModel, options: SolveOptions) -> SolveResult:
@@ -34,9 +34,11 @@ class CpSatAdapter(SolverAdapter):
 
         cp = cp_model.CpModel()
         variables = {}
+        bounds: dict[str, tuple[int, int]] = {}
         for v in model.variables:
             lb, ub = int(math.ceil(v.lb)), int(math.floor(v.ub))
             variables[v.key] = cp.NewIntVar(lb, ub, v.key)
+            bounds[v.key] = (lb, ub)
 
         scales: dict[str, int] = {}
         for c in model.constraints:
@@ -53,11 +55,25 @@ class CpSatAdapter(SolverAdapter):
             else:
                 cp.Add(expr == rhs)
 
-        obj_scale = _scale_for(list(model.objective.terms.values()) or [0.0])
-        if model.objective.terms:
+        # A degree-two objective is expressed the way CP-SAT expresses one: an
+        # auxiliary variable per product, constrained to equal it. That is why
+        # convexity is not a question here as it is for HiGHS — nothing is being
+        # minimised by convex optimisation, it is search over integers.
+        products = []
+        for term in model.objective.quadratic:
+            lo, hi = _product_bounds(bounds[term.i], bounds[term.j])
+            product = cp.NewIntVar(lo, hi, f"({term.i})*({term.j})")
+            cp.AddMultiplicationEquality(product, [variables[term.i], variables[term.j]])
+            products.append((term.coef, product))
+
+        obj_scale = _scale_for(
+            list(model.objective.terms.values()) + [c for c, _ in products] or [0.0]
+        )
+        if model.objective.terms or products:
             cp.Minimize(
                 sum(_exact(coef, obj_scale) * variables[key]
                     for key, coef in model.objective.terms.items())
+                + sum(_exact(coef, obj_scale) * product for coef, product in products)
             )
 
         solver = cp_model.CpSolver()
@@ -97,12 +113,23 @@ class CpSatAdapter(SolverAdapter):
         if not mapped.has_solution:
             return result
         result.values = {key: float(solver.Value(var)) for key, var in variables.items()}
-        if model.objective.terms:
+        if model.objective.terms or model.objective.quadratic:
             result.objective_value = solver.ObjectiveValue() / obj_scale + model.objective.constant
             result.best_bound = solver.BestObjectiveBound() / obj_scale + model.objective.constant
         else:
             result.objective_value = model.objective.constant
         return result
+
+
+def _product_bounds(a: tuple[int, int], b: tuple[int, int]) -> tuple[int, int]:
+    """Range of ``a * b``, taken from the corners — a product of two ranges is
+    not monotone once either can go negative, so all four have to be looked at.
+
+    The bounds come from the flat model rather than from the CP-SAT variable:
+    the solver's own proto is not a reliable place to read a domain back from.
+    """
+    corners = [x * y for x in a for y in b]
+    return min(corners), max(corners)
 
 
 def _scale_for(numbers: list[float]) -> int:

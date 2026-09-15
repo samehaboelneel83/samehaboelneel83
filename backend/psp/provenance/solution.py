@@ -149,6 +149,12 @@ def _objectives(compiled: CompiledProblem, values: dict[str, float]) -> list[Obj
         value = component.get("constant", 0.0) + sum(
             coef * values.get(key, 0.0) for key, coef in component["terms"].items()
         )
+        # A quadratic objective is reported at its full value, not at its linear
+        # part — the number on the screen has to be the thing that was minimised.
+        value += sum(
+            coef * values.get(i, 0.0) * values.get(j, 0.0)
+            for i, j, coef in component.get("quadratic", ())
+        )
         out.append(
             ObjectiveValue(
                 name=component["name"],
